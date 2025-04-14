@@ -19,6 +19,31 @@ import { init as initI18n } from './locales/i18n'
 initI18n()
 
 export type TimeBoxType = 'estimated' | 'actual'
+
+// Add Google Calendar color variables to the root element
+const addGoogleCalendarColorVars = () => {
+  // Google Calendar color IDs and their associated colors
+  const googleColors = {
+    '1': '#7986cb', // Lavender
+    '2': '#33b679', // Sage
+    '3': '#8e24aa', // Grape
+    '4': '#e67c73', // Flamingo
+    '5': '#f6bf26', // Banana
+    '6': '#f4511e', // Tangerine
+    '7': '#039be5', // Peacock
+    '8': '#0b8043', // Eucalyptus
+    '9': '#b39ddb', // Lavender (light)
+    '10': '#616161', // Graphite
+    '11': '#3f51b5', // Blueberry
+  };
+  
+  // Add the colors as CSS variables to :root
+  const root = document.documentElement;
+  Object.entries(googleColors).forEach(([id, color]) => {
+    root.style.setProperty(`--google-calendar-color-${id}`, color);
+  });
+};
+
 const Dashboard = () => {
   const app = useAtomValue(appAtom)
   // 需要初始化 settings
@@ -27,6 +52,7 @@ const Dashboard = () => {
   const { refreshEntities } = useAgendaEntities()
   const { refreshPages } = usePages()
   const [connectionErrorModal, setConnectionErrorModal] = useState(false)
+  const [reRender, setReRender] = useState<number>(0)
 
   const loadData = useCallback(() => {
     refreshEntities().catch((error) => {
@@ -69,6 +95,12 @@ const Dashboard = () => {
       setLogseq({ currentGraph: graph })
     })
   }, [])
+
+  // Add Google Calendar color variables on mount
+  useEffect(() => {
+    addGoogleCalendarColorVars();
+  }, []);
+
   return (
     <div
       className={cn(

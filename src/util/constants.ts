@@ -120,6 +120,19 @@ export const DEFAULT_SETTINGS: ISettingsForm = {
     borderColor: '#047857',
     enabled: true,
   },
+  googleCalendar: {
+    clientId: '',
+    apiKey: '',
+    enabled: false,
+    syncEnabled: true,
+    calendar: {
+      id: 'Google Calendar',
+      bgColor: '#4285F4',
+      textColor: '#fff',
+      borderColor: '#4285F4',
+      enabled: true
+    }
+  },
   journal: {
     id: 'Journal',
     bgColor: '#047857',

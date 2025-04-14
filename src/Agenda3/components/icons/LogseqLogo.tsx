@@ -1,6 +1,12 @@
-const LogseqLogo = () => {
+import { cn } from '@/util/util'
+
+interface LogseqLogoProps {
+  className?: string;
+}
+
+const LogseqLogo = ({ className }: LogseqLogoProps) => {
   return (
-    <svg width="1em" height="1em" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <svg className={cn(className)} width="1em" height="1em" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
       <path
         fill="currentColor"
         stroke="currentColor"

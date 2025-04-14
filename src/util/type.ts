@@ -40,6 +40,19 @@ export type ISettingsForm = {
   projectList?: ICustomCalendar[]
   calendarList?: Array<CalendarConfig>
   subscriptionList?: Array<ICustomCalendar & { url: string }>
+  googleCalendar?: {
+    clientId?: string
+    apiKey?: string
+    enabled?: boolean
+    syncEnabled?: boolean
+    calendar?: {
+      id: string
+      bgColor: string
+      textColor: string
+      borderColor: string
+      enabled: boolean
+    }
+  }
   pomodoro: {
     pomodoro: number
     shortBreak: number
