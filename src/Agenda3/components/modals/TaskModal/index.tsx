@@ -166,8 +166,8 @@ const TaskModal = ({
       const isMac = getOS() === 'mac'
       const mainModifierKey = isMac ? event.metaKey : event.ctrlKey
 
-      if (event.code === 'KeyW' && mainModifierKey) {
-        // Close the modal on pressing ctrl+q (or cmd+q on Mac)
+      if (event.key === 'Escape') {
+        // Close the modal on pressing Escape
         onCancel?.()
         setInternalOpen(false)
         event.stopPropagation()

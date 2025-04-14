@@ -1,6 +1,7 @@
 import { Dropdown, message } from 'antd'
+import dayjs from 'dayjs'
 import { useAtomValue } from 'jotai'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BsArchive } from 'react-icons/bs'
 import { RiDeleteBin4Line } from 'react-icons/ri'
 import { VscDebugConsole } from 'react-icons/vsc'
@@ -23,6 +24,7 @@ const TaskCard = ({ task }: { task: AgendaTaskWithStartOrDeadline }) => {
   const currentGraph = useAtomValue(logseqAtom).currentGraph
   const settings = useAtomValue(settingsAtom)
   const groupType = settings.selectedFilters?.length ? 'filter' : 'page'
+  const [isHovered, setIsHovered] = useState(false)
 
   const [editTaskModal, setEditTaskModal] = useState<{
     open: boolean
@@ -59,10 +61,43 @@ const TaskCard = ({ task }: { task: AgendaTaskWithStartOrDeadline }) => {
     e.stopPropagation()
   }
 
+  const updateTaskToTomorrow = () => {
+    if (editDisabled) return
+    const tomorrow = dayjs().add(1, 'day')
+    updateEntity({
+      type: 'task-date',
+      id: task.id,
+      data: {
+        start: tomorrow,
+        allDay: true,
+      },
+    })
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if we're in an input field
+      const activeElement = document.activeElement
+      if (activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA') {
+        return
+      }
+
+      if (e.key.toLowerCase() === 'd' && isHovered) {
+        updateTaskToTomorrow()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isHovered, task.id])
+
   return (
     <div
       className={cn(
-        'group/card cursor-pointer whitespace-pre-wrap rounded-md bg-white p-2 hover:shadow dark:bg-zinc-700',
+        `group/card cursor-pointer whitespace-pre-wrap rounded-md bg-white p-2 hover:border hover:border-gray-300 hover:shadow
+        dark:bg-zinc-700 dark:hover:border-zinc-500`,
         {
           'bg-[#edeef0] opacity-80 dark:bg-[#2f2f33]': task.status === 'done',
           // 循环任务及多天任务不能拖拽
@@ -76,6 +111,8 @@ const TaskCard = ({ task }: { task: AgendaTaskWithStartOrDeadline }) => {
         color: groupType === 'page' ? task.project.bgColor : task?.filters?.[0]?.color,
       })}
       data-id={task.id}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
       <Dropdown
         trigger={['contextMenu']}

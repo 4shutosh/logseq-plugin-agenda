@@ -18,6 +18,7 @@ import Calendar, { type CalendarHandle } from './calendar/Calendar'
 import CalendarOperation, { CALENDAR_VIEWS, type CalendarView } from './calendar/CalendarAdvancedOperation'
 import KanBan, { type KanBanHandle } from './kanban/KanBan'
 import SettingsModal from './modals/SettingsModal'
+import TaskModal from './modals/TaskModal'
 
 const MultipleView = ({ className }: { className?: string }) => {
   const { t } = useTranslation()
@@ -25,6 +26,7 @@ const MultipleView = ({ className }: { className?: string }) => {
   const calendarRef = useRef<CalendarHandle>(null)
   const [app, setApp] = useAtom(appAtom)
   const settings = useAtomValue(settingsAtom)
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
 
   const [calendarTitle, setCalendarTitle] = useState('')
 
@@ -99,8 +101,16 @@ const MultipleView = ({ className }: { className?: string }) => {
       // Get the currently focused element
       const activeElement = document.activeElement
 
-      // If the focused element is an input or textarea, ignore the keydown event
-      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) return
+      // Check if we're in an input field
+      if (activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA') {
+        return
+      }
+
+      // Handle 'a' key to open TaskModal
+      if (event.key.toLowerCase() === 'a') {
+        setIsTaskModalOpen(true)
+        track('Open TaskModal', { source: 'keyboard_shortcut' })
+      }
 
       const calendarApi = calendarRef.current
 
@@ -207,6 +217,17 @@ const MultipleView = ({ className }: { className?: string }) => {
           <Calendar ref={calendarRef} onCalendarTitleChange={setCalendarTitle} />
         )}
       </div>
+      <TaskModal
+        open={isTaskModalOpen}
+        onOk={() => setIsTaskModalOpen(false)}
+        onCancel={() => setIsTaskModalOpen(false)}
+        info={{
+          type: 'create',
+          initialData: {
+            startDateVal: dayjs(),
+          },
+        }}
+      />
     </div>
   )
 }
