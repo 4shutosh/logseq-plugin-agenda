@@ -18,8 +18,14 @@ import ColumnTitle from './ColumnTitle'
 import type { KanBanItem } from './KanBan'
 import TaskCard from './taskCard/TaskCard'
 
-export type ColumnProps = { day: Dayjs; tasks: AgendaTaskWithStartOrDeadline[]; allKanbanItems: KanBanItem[] }
-const Column = ({ day, tasks, allKanbanItems }: ColumnProps, ref) => {
+export type ColumnProps = {
+  day: Dayjs
+  tasks: AgendaTaskWithStartOrDeadline[]
+  allKanbanItems: KanBanItem[]
+  rootClassName?: string
+}
+
+const Column = ({ day, tasks, allKanbanItems, rootClassName }: ColumnProps, ref) => {
   const columnContainerRef = useRef<HTMLDivElement>(null)
   // bind draggable
   const hadBindDropRef = useRef(false)
@@ -87,7 +93,12 @@ const Column = ({ day, tasks, allKanbanItems }: ColumnProps, ref) => {
 
   return (
     <>
-      <div key={dateStr} className="mt-2 flex w-[265px] shrink-0 flex-col" id={dateStr} ref={columnContainerRef}>
+      <div
+        key={dateStr}
+        className={cn('mt-2 flex w-[265px] shrink-0 flex-col', rootClassName)}
+        id={dateStr}
+        ref={columnContainerRef}
+      >
         {/* ========= Title ========= */}
         <ColumnTitle day={day} />
 

@@ -1,11 +1,12 @@
 import { LeftOutlined, RightOutlined } from '@ant-design/icons'
-import { Button, Segmented } from 'antd'
+import { Button, Segmented, Switch } from 'antd'
 import dayjs from 'dayjs'
 import { useAtom, useAtomValue } from 'jotai'
 import { useRef, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FiSettings, FiXCircle } from 'react-icons/fi'
 import { LuCalendarDays, LuKanbanSquare } from 'react-icons/lu'
+import { MdOutlineCenterFocusWeak } from 'react-icons/md'
 
 import { track } from '@/Agenda3/helpers/umami'
 import { type App, appAtom } from '@/Agenda3/models/app'
@@ -57,6 +58,7 @@ const MultipleView = ({ className }: { className?: string }) => {
     }
     track('Today Button', { view: app.view })
   }
+
   const onClickAppViewChange = (view) => {
     const _view = view as App['view']
     setApp((_app) => {
@@ -65,6 +67,15 @@ const MultipleView = ({ className }: { className?: string }) => {
     })
     track('View Change', { view: view })
   }
+
+  const toggleFocusMode = (checked: boolean) => {
+    setApp((_app) => ({ ..._app, focusMode: checked }))
+    if (checked) {
+      // When entering focus mode, ensure we're scrolled to today
+      kanbanRef.current?.scrollToToday()
+    }
+  }
+
   const onClickGoal = () => {
     const type = calendarRef.current?.getView() === 'dayGridMonth' ? 'month' : 'week'
     const date = calendarRef.current?.getDate()
@@ -133,6 +144,11 @@ const MultipleView = ({ className }: { className?: string }) => {
         // TODO UI: toggle the state of Calendar-Tasks slider accordingly
       }
 
+      // Add keyboard shortcut for focus mode toggle (F key)
+      if (event.code === 'KeyF' && app.view === 'tasks') {
+        toggleFocusMode(!app.focusMode)
+      }
+
       lastKey = event.code
       lastKeyDownTime = currentTime
     }
@@ -142,7 +158,7 @@ const MultipleView = ({ className }: { className?: string }) => {
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [app.calendarView, app.view, setApp])
+  }, [app.calendarView, app.view, app.focusMode, setApp])
 
   return (
     <div className={cn('relative z-0 flex w-0 flex-1 flex-col py-1 pl-2', className)}>
@@ -175,12 +191,7 @@ const MultipleView = ({ className }: { className?: string }) => {
             {t('Today')}
           </Button>
           {app.view === 'calendar' ? (
-            <h1 className="ml-3 flex items-center gap-1 text-xl font-medium">
-              {calendarTitle}
-              {/* <div className="cursor-pointer text-gray-400 hover:text-gray-700" onClick={onClickGoal}>
-                <GoGoal />
-              </div> */}
-            </h1>
+            <h1 className="ml-3 flex items-center gap-1 text-xl font-medium">{calendarTitle}</h1>
           ) : null}
         </div>
         <div className="flex items-center gap-3">
@@ -193,7 +204,13 @@ const MultipleView = ({ className }: { className?: string }) => {
                 track('Calendar View Change', { calendarView: view })
               }}
             />
-          ) : null}
+          ) : (
+            <div className="flex items-center gap-2">
+              <MdOutlineCenterFocusWeak className="text-lg" />
+              <span className="text-sm">{t('Focus Mode')}</span>
+              <Switch checked={app.focusMode} onChange={toggleFocusMode} size="small" />
+            </div>
+          )}
           <Segmented
             defaultValue={app.view}
             className="!bg-gray-200 dark:!bg-zinc-700"

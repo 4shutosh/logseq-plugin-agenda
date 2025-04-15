@@ -9,10 +9,12 @@ export type App = {
   calendarView: CalendarView
   sidebarType: 'timebox' | 'backlog' | 'objective'
   objectivePeriod?: AgendaEntityObjective
+  focusMode: boolean // New property for focus mode
 }
 export const appAtom = atom<App>({
   view: 'tasks',
   rightSidebarFolded: false,
   calendarView: 'dayGridMonth',
   sidebarType: 'timebox',
+  focusMode: false,
 })
