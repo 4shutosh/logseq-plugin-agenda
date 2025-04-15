@@ -112,112 +112,22 @@ export const secondsToHHmmss = (seconds: number): string => {
   return `${padZero(hour)}:${padZero(minute)}:${padZero(second)}`
 }
 
-export const transformGoogleEventToCalendarEvent = (googleEvent: any): any => {
-  if (!googleEvent) {
-    console.error('[GoogleCalendar Debug] Invalid Google event (null)')
-    return null
-  }
+export const transformGoogleEventToCalendarEvent = (task: AgendaTaskWithStartOrDeadline): CalendarEvent => {
+  const { id, title, start, end, allDay, project, filters, bgColor } = task;
 
-  if (!googleEvent.start || !googleEvent.end) {
-    console.error('[GoogleCalendar Debug] Event missing start or end:', googleEvent)
-    const now = new Date()
-    const hour = 60 * 60 * 1000
-    return {
-      id: googleEvent.id || `google_${Date.now()}`,
-      title: googleEvent.summary?.trim() || 'Untitled Event',
-      start: now,
-      end: new Date(now.getTime() + hour),
-      allDay: false,
-      className: 'google-calendar-event error-event',
-      editable: true,
-      color: '#FF0000',
-      extendedProps: {
-        googleEvent: true,
-        error: true,
-        title: googleEvent.summary?.trim() || 'Untitled Event',
-        id: googleEvent.id || `google_${Date.now()}`,
-      },
-    }
-  }
-
-  try {
-    const eventTitle = googleEvent.summary?.trim() || 'Untitled Event'
-
-    const isAllDay = !!googleEvent.start.date
-    let startDateTime: Date, endDateTime: Date
-
-    if (isAllDay) {
-      try {
-        startDateTime = new Date(googleEvent.start.date)
-        const endDate = new Date(googleEvent.end.date)
-        endDate.setDate(endDate.getDate() - 1)
-        endDateTime = endDate
-      } catch (e) {
-        console.error('[GoogleCalendar Debug] Error parsing all-day dates:', e)
-        startDateTime = new Date()
-        endDateTime = new Date()
-        endDateTime.setDate(startDateTime.getDate() + 1)
-      }
-    } else {
-      const parseDateTime = (dateTimeStr: string): Date => {
-        try {
-          return dayjs.tz(dateTimeStr, googleEvent.start.timeZone || 'UTC').toDate()
-        } catch (e) {
-          console.error('[GoogleCalendar Debug] Date parse error:', e)
-          return new Date()
-        }
-      }
-
-      startDateTime = parseDateTime(googleEvent.start.dateTime)
-      endDateTime = parseDateTime(googleEvent.end.dateTime)
-    }
-
-    return {
-      id: googleEvent.id || `google_${Date.now()}`,
-      title: eventTitle,
-      start: startDateTime,
-      end: endDateTime,
-      allDay: isAllDay,
-      className: 'google-calendar-event',
-      editable: true,
-      rrule: null,
-      color: googleEvent.colorId ? `var(--google-calendar-color-${googleEvent.colorId})` : '#4285F4',
-      textColor: '#FFFFFF',
-      borderColor: googleEvent.colorId ? `var(--google-calendar-color-${googleEvent.colorId})` : '#4285F4',
-      extendedProps: {
-        id: googleEvent.id || `google_${Date.now()}`,
-        googleEvent: true,
-        title: eventTitle,
-        description: googleEvent.description || '',
-        location: googleEvent.location || '',
-        originalStart: startDateTime,
-        originalEnd: endDateTime,
-        status: 'todo',
-        showTitle: true,
-        project: {
-          bgColor: googleEvent.colorId ? `var(--google-calendar-color-${googleEvent.colorId})` : '#4285F4',
-          title: 'Google Calendar',
-        },
-        rrule: null,
-        recurringPast: false,
-      },
-    }
-  } catch (error) {
-    console.error('[GoogleCalendar Debug] Error transforming Google event:', error)
-    return {
-      id: googleEvent.id || `google_${Date.now()}`,
-      title: googleEvent.summary?.trim() || 'Error: Could not parse event',
-      start: new Date(),
-      end: new Date(Date.now() + 3600000),
-      allDay: false,
-      className: 'google-calendar-event error-event',
-      editable: true,
-      color: '#FF0000',
-      extendedProps: {
-        googleEvent: true,
-        error: true,
-        title: googleEvent.summary?.trim() || 'Error: Could not parse event',
-      },
-    }
-  }
+  // Assuming start and end are Date objects or can be converted to Date
+  return {
+    id,
+    title: title || 'Untitled Task',
+    allDay: allDay || false,
+    start: start ? start.toDate() : new Date(), // Fallback to current date if start is missing
+    end: end ? end.toDate() : new Date(), // Fallback to current date if end is missing
+    extendedProps: {
+      project,
+      filters,
+      // Add any other properties that might be relevant
+    },
+    editable: false, // Assuming the event is editable
+    color: bgColor || filters?.[0]?.color || '#000', // Default color if none is provided
+  };
 }

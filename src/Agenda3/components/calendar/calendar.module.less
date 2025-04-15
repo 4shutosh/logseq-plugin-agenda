@@ -26,33 +26,6 @@
     .fc-timegrid-col.fc-day-sun, .fc-timegrid-col.fc-day-sat {
       @apply bg-[#f0f0f0];
     }
-    
-    /* Google Calendar Event Styles */
-    .google-calendar-event {
-      border-radius: 3px;
-      border-width: 0;
-      border-left-width: 4px !important;
-      
-      .fc-event-main {
-        padding: 2px 4px;
-      }
-      
-      &.fc-daygrid-event {
-        background-color: #4285F4;
-        color: white;
-        font-weight: 500;
-        
-        &:hover {
-          filter: brightness(0.9);
-        }
-      }
-      
-      &.fc-timegrid-event {
-        .fc-event-main {
-          padding: 2px 4px;
-        }
-      }
-    }
   }
 }
 
@@ -70,17 +43,6 @@
       }
       .fc-timegrid-col.fc-day-sun, .fc-timegrid-col.fc-day-sat {
         @apply bg-zinc-900;
-      }
-      
-      /* Google Calendar Event Dark Mode Styles */
-      .google-calendar-event {
-        border-color: rgba(255, 255, 255, 0.3);
-        
-        &.fc-daygrid-event {
-          &:hover {
-            filter: brightness(1.1);
-          }
-        }
       }
     }
   }

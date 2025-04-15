@@ -3,7 +3,7 @@ import { message } from 'antd'
 
 import { 
   getEvents, 
-  convertGoogleEventsToSchedules, 
+  convertGoogleEventsToAgendaTask, 
   isSignedIn, 
   initGoogleApi, 
   signIn,
@@ -11,11 +11,12 @@ import {
   gapi
 } from '@/services/googleCalendar'
 import useSettings from './useSettings'
-import { ISchedule } from 'tui-calendar'
+import { useAtom } from 'jotai'
+import { googleCalendarTasks } from '../models/entities/tasks'
 
 const useGoogleCalendar = () => {
   const { settings } = useSettings()
-  const [googleEvents, setGoogleEvents] = useState<ISchedule[]>([])
+  const [googleTasks, setGoogleTasks] = useAtom(googleCalendarTasks)
   const [isLoading, setIsLoading] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
   
@@ -64,7 +65,7 @@ const useGoogleCalendar = () => {
         console.log('[GoogleCalendar Debug] First event:', events[0])
       }
       
-      const schedules = convertGoogleEventsToSchedules(events)
+      const schedules = convertGoogleEventsToAgendaTask(events)
       console.log(`[GoogleCalendar Debug] Converted to ${schedules.length} schedules`)
       
       // Apply colors from settings
@@ -77,7 +78,7 @@ const useGoogleCalendar = () => {
         })
       }
       
-      setGoogleEvents(schedules)
+      setGoogleTasks(schedules)
       return schedules
     } catch (error) {
       console.error('[GoogleCalendar Debug] Error fetching Google Calendar events:', error)
@@ -144,12 +145,14 @@ const useGoogleCalendar = () => {
   }, [isInitialized, syncGoogleEvents, settings.googleCalendar?.enabled, settings.googleCalendar?.syncEnabled])
   
   return {
-    googleEvents,
+    googleTasks,
     isLoading,
     isInitialized,
     fetchGoogleEvents,
     syncGoogleEvents
   }
 }
+
+
 
 export default useGoogleCalendar 

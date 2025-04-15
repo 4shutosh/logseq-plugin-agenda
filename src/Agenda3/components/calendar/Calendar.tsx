@@ -15,15 +15,13 @@ import { transformAgendaTaskToCalendarEvent, transformGoogleEventToCalendarEvent
 import { navToLogseqBlock } from '@/Agenda3/helpers/logseq'
 import { track } from '@/Agenda3/helpers/umami'
 import useAgendaEntities from '@/Agenda3/hooks/useAgendaEntities'
-import useGoogleCalendar from '@/Agenda3/hooks/useGoogleCalendar'
 import { appAtom } from '@/Agenda3/models/app'
-import { tasksWithStartOrDeadlineAtom } from '@/Agenda3/models/entities/tasks'
+import { googleCalendarTasks, tasksWithStartOrDeadlineAtom } from '@/Agenda3/models/entities/tasks'
 import { logseqAtom } from '@/Agenda3/models/logseq'
 import { settingsAtom } from '@/Agenda3/models/settings'
 // import useTheme from '@/hooks/useTheme'
 import type { AgendaTaskWithStart } from '@/types/task'
 import { cn } from '@/util/util'
-import { createEvent, updateEvent, deleteEvent } from '@/services/googleCalendar'
 
 import TaskModal from '../modals/TaskModal'
 import { type CreateTaskForm } from '../modals/TaskModal/useCreate'
@@ -39,51 +37,6 @@ const FULL_CALENDAR_24HOUR_FORMAT = {
 } as const
 type CalendarProps = { onCalendarTitleChange: (title: string) => void }
 const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
-  // Add error state to prevent total crashes
-  const [hasError, setHasError] = useState(false);
-  
-  // Error handler
-  const handleError = (error: any) => {
-    console.error("[Calendar] Error in calendar component:", error);
-    setHasError(true);
-  };
-
-  useEffect(() => {
-    // Add global error handler
-    const errorHandler = (event: ErrorEvent) => {
-      console.error('[Calendar] Caught global error:', event.error);
-      // Only handle errors from this component
-      if (event.error?.toString().includes('FullCalendar') || 
-          event.error?.toString().includes('Calendar')) {
-        setHasError(true);
-        // Prevent the error from crashing the entire app
-        event.preventDefault();
-      }
-    };
-    
-    window.addEventListener('error', errorHandler);
-    return () => window.removeEventListener('error', errorHandler);
-  }, []);
-
-  // If we have an error, show a fallback UI
-  if (hasError) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center text-center p-4">
-        <h3 className="text-xl font-semibold mb-2">Calendar Error</h3>
-        <p className="mb-4">The calendar encountered an error and couldn't be displayed.</p>
-        <button 
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          onClick={() => {
-            setHasError(false);
-            window.location.reload();
-          }}
-        >
-          Reload Calendar
-        </button>
-      </div>
-    );
-  }
-
   // const [currentView, setCurrentView] = useState<CalendarView>('dayGridMonth')
   const calendarRef = useRef<FullCalendar>(null)
   const { currentTheme: theme } = useTheme()
@@ -92,18 +45,22 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
   const tasksWithStartOrDeadline = useAtomValue(tasksWithStartOrDeadlineAtom)
   const settings = useAtomValue(settingsAtom)
   const { currentGraph } = useAtomValue(logseqAtom)
-  const { googleEvents, syncGoogleEvents, isLoading: isSyncingGoogleEvents } = useGoogleCalendar()
   const startingDay = settings.general?.startOfWeek
   const groupType = settings.selectedFilters?.length ? 'filter' : 'page'
   const showTasks = tasksWithStartOrDeadline?.filter((task) =>
     settings.viewOptions?.hideCompleted ? task.status === 'todo' : true,
   )
+
+  const googleEvents = useAtomValue(googleCalendarTasks)
+  const googleEventsMapped = googleEvents?.
+    map((task) => transformGoogleEventToCalendarEvent(task), {
+      showFirstEventInCycleOnly: settings.viewOptions?.showFirstEventInCycleOnly,
+      showTimeLog: settings.viewOptions?.showTimeLog,
+      groupType,
+    }).flat()
   
-  // Check if Google Calendar is enabled
-  const googleCalendarEnabled = settings.googleCalendar?.enabled === true
-  
-  // Convert tasks to calendar events
-  const logseqEvents = showTasks
+  // const now = dayjs()
+  const showEventsMapped = [...showTasks]
     ?.map((task) =>
       transformAgendaTaskToCalendarEvent(task, {
         showFirstEventInCycleOnly: settings.viewOptions?.showFirstEventInCycleOnly,
@@ -112,75 +69,15 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
       }),
     )
     .flat()
-    
-  // Convert Google Calendar events to FullCalendar events
-  const googleCalendarEvents = googleCalendarEnabled 
-    ? googleEvents.map(event => {
-        try {
-          // Make sure we have a valid event with start and end date
-          if (!event || !event.start || !event.end) {
-            console.error('[GoogleCalendar Debug] Invalid event:', event)
-            return null
-          }
-          return transformGoogleEventToCalendarEvent(event)
-        } catch (err) {
-          console.error('[GoogleCalendar Debug] Error transforming event:', err, event)
-          return null
-        }
-      }).filter(Boolean) // Remove any null entries
-    : []
-  
-  // Debug Google Calendar events
-  useEffect(() => {
-    console.log('[GoogleCalendar Debug] googleEvents from hook:', googleEvents.length)
-    console.log('[GoogleCalendar Debug] googleCalendarEvents after transform:', googleCalendarEvents.length)
-    
-    if (googleCalendarEvents.length > 0) {
-      console.log('[GoogleCalendar Debug] First transformed event:', googleCalendarEvents[0])
-    } else if (googleEvents.length > 0) {
-      console.log('[GoogleCalendar Debug] First google event from hook (not transformed):', googleEvents[0])
-    }
-    
-    if (googleCalendarEnabled) {
-      console.log('[GoogleCalendar Debug] Google Calendar is enabled')
-    } else {
-      console.log('[GoogleCalendar Debug] Google Calendar is disabled')
-    }
-  }, [googleEvents, googleCalendarEvents, googleCalendarEnabled])
-  
-  // Combine Logseq events with Google Calendar events
-  const allEvents = [...(logseqEvents || []), ...googleCalendarEvents];
-  
-  // Validate calendar events to ensure they have required properties
-  const calendarEvents = allEvents.filter(event => {
-    if (!event) return false;
-    if (!event.start || !event.end) {
-      console.error('[Calendar] Filtering out event without start/end:', event);
-      return false;
-    }
-    return true;
-  });
-  
-  // Debug combined events
-  useEffect(() => {
-    console.log('[GoogleCalendar Debug] Total events:', allEvents.length);
-    console.log('[GoogleCalendar Debug] Valid calendar events:', calendarEvents.length);
-    console.log('[GoogleCalendar Debug] Logseq events:', logseqEvents?.length || 0);
-    console.log('[GoogleCalendar Debug] Google Calendar events:', googleCalendarEvents.length);
-    
-    if (googleCalendarEvents.length > 0) {
-      console.log('[GoogleCalendar Debug] First Google event:', googleCalendarEvents[0]);
-    }
-    
-    if (calendarEvents.length > 0) {
-      console.log('[GoogleCalendar Debug] First calendar event:', calendarEvents[0]);
-    }
-  }, [calendarEvents, logseqEvents, googleCalendarEvents, allEvents]);
+
+  const calendarEvents = [...showEventsMapped,...googleEventsMapped]
+  .sort(
+    (a, b) => a.start.getTime() - b.start.getTime()
+  );
 
   const [editTaskModal, setEditTaskModal] = useState<{
     open: boolean
     task?: AgendaTaskWithStart
-    googleEvent?: any
   }>({
     open: false,
   })
@@ -193,78 +90,21 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
   >({
     open: false,
   })
-  
-  // Sync Google Calendar events when calendar dates change
-  const handleDatesSet = () => {
-    if (googleCalendarEnabled && calendarRef.current) {
-      const calendarApi = calendarRef.current.getApi()
-      const startDate = calendarApi.view.currentStart
-      const endDate = calendarApi.view.currentEnd
-      
-      // Convert to UTC dates to match Google Calendar API
-      syncGoogleEvents()
-    }
-  }
 
   const onEventClick = (info: EventClickArg) => {
-    const { extendedProps } = info.event
-    
-    // Check if it's a Google Calendar event
-    if (extendedProps.googleEvent) {
-      // Handle Google Calendar event click
-      if (info.jsEvent.ctrlKey || info.jsEvent.metaKey) {
-        // Open in Google Calendar
-        window.open(`https://calendar.google.com/calendar/event?eid=${extendedProps.id}`, '_blank')
-      } else {
-        // Open edit modal for Google Calendar event
-        setEditTaskModal({
-          open: true,
-          googleEvent: extendedProps
-        })
-      }
-    } else {
-      // Handle Logseq event click
-      setEditTaskModal({
-        open: true,
-        task: extendedProps as AgendaTaskWithStart,
-      })
-    }
+    setEditTaskModal({
+      open: true,
+      task: info.event.extendedProps as AgendaTaskWithStart,
+    })
   }
-  
   const onEventCtrlClick = (info: EventClickArg) => {
-    const { extendedProps } = info.event
-    
-    // Check if it's a Google Calendar event
-    if (extendedProps.googleEvent) {
-      // Open in Google Calendar
-      window.open(`https://calendar.google.com/calendar/event?eid=${extendedProps.id}`, '_blank')
-    } else {
-      // Navigate to Logseq block
-      navToLogseqBlock(extendedProps as AgendaTaskWithStart, currentGraph)
-    }
+    navToLogseqBlock(info.event.extendedProps as AgendaTaskWithStart, currentGraph)
   }
-  
   const onEventScheduleUpdate = (info: EventResizeDoneArg | EventReceiveArg | EventDropArg) => {
-    const { start, end, id, allDay, extendedProps } = info.event
-    
-    // Check if it's a Google Calendar event
-    if (extendedProps.googleEvent) {
-      // Update Google Calendar event
-      updateEvent(
-        extendedProps.id,
-        extendedProps.title,
-        new Date(start!.toString()),
-        new Date(end?.toString() || start!.toString()),
-        allDay
-      ).catch(() => {
-        // Revert the change if update fails
-        info.revert()
-      })
-      return
-    }
-    
-    // Handle Logseq event updates
+    // const calendarApi = calendarRef.current?.getApi()
+    const { start, end, id: blockUUID, allDay, extendedProps } = info.event
     const startDay = dayjs(start)
+    // const estimatedTime = dayjs(end).diff(start, 'minute')
     const endDay = dayjs(end).subtract(1, 'day')
     const isMultipleDay = end && allDay ? !dayjs(end).isSame(endDay, 'day') : false
     const dateInfo = {
@@ -274,14 +114,23 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
       allDay,
     }
     try {
-      updateEntity({ type: 'task-date', id, data: dateInfo })
+      updateEntity({ type: 'task-date', id: blockUUID, data: dateInfo })
+      // const event = calendarApi?.getEventById(blockUUID)
+      // if (event) {
+      //   event.setProp('extendedProps', {
+      //     ...event.extendedProps,
+      //     ...dateInfo,
+      //   })
+      // }
+
+      // refreshAllTasks()
+      // 其他天移动到今天的 timebox，需要对应移动 kanban
     } catch (error) {
       logseq.UI.showMsg('resize failed')
       info.revert()
       console.error('[Agenda3] calendar resize failed', error)
     }
   }
-  
   const onSelect = (info: DateSelectArg) => {
     if (info.allDay) {
       const endDay = dayjs(info.end).subtract(1, 'day')
@@ -305,48 +154,17 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
     })
   }
 
-  // Handle Google Calendar event creation
-  const handleCreateGoogleEvent = (title: string, start: Date, end: Date, isAllDay: boolean) => {
-    if (googleCalendarEnabled) {
-      createEvent(title, start, end, isAllDay)
-        .then(() => {
-          // Refresh Google Calendar events
-          syncGoogleEvents()
-        })
-        .catch(error => {
-          console.error('Failed to create Google Calendar event:', error)
-        })
-    }
-  }
-  
-  // Handle Google Calendar event deletion
-  const handleDeleteGoogleEvent = (eventId: string) => {
-    if (googleCalendarEnabled) {
-      deleteEvent(eventId)
-        .then(() => {
-          // Refresh Google Calendar events
-          syncGoogleEvents()
-        })
-        .catch(error => {
-          console.error('Failed to delete Google Calendar event:', error)
-        })
-    }
-  }
-
   useImperativeHandle(ref, () => {
     const calendarApi = calendarRef.current?.getApi()
     return {
       next: () => {
         calendarApi?.next()
-        handleDatesSet()
       },
       prev: () => {
         calendarApi?.prev()
-        handleDatesSet()
       },
       changeView: (view: CalendarView) => {
         calendarApi?.changeView(view)
-        handleDatesSet()
       },
       getView: () => {
         return calendarApi?.view.type
@@ -356,11 +174,7 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
       },
       navToday: () => {
         calendarApi?.today()
-        handleDatesSet()
       },
-      syncGoogleCalendar: () => {
-        syncGoogleEvents()
-      }
     }
   })
 
@@ -384,117 +198,135 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
         '--fc-page-bg-color': theme === 'dark' ? '#444' : '#fff',
       }}
     >
-      {/* Wrap calendar in try-catch to prevent total crashes */}
-      {(() => {
-        try {
-          return (
-            <FullCalendar
-              droppable
-              editable
-              selectable
-              dayMaxEventRows // allow "more" link when too many events
-              weekNumbers
-              weekNumberContent={({ num, date }) => <WeekNumber weekNumber={num} date={date} />}
-              defaultTimedEventDuration="00:30"
-              firstDay={Number(startingDay)}
-              fixedWeekCount={false}
-              ref={calendarRef}
-              height="100%"
-              // locales={[esLocale]}
-              // locale={enLocale}
-              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, rrulePlugin]}
-              headerToolbar={false}
-              initialView="dayGridMonth"
-              events={calendarEvents}
-              eventClick={onEventClick}
-              eventResize={onEventScheduleUpdate}
-              eventDrop={onEventScheduleUpdate}
-              eventReceive={onEventScheduleUpdate}
-              datesSet={handleDatesSet}
-              eventDidMount={(info) => {
-                // Added these lines
-                if (info.event.extendedProps?.googleEvent) {
-                  info.el.classList.add('google-calendar-event')
-                }
-              }}
-              select={onSelect}
-              viewDidMount={(arg) => {
-                onCalendarTitleChange(arg.view.title)
-              }}
-              eventClassNames={(info) => {
-                const task = info.event.extendedProps
-                let classNames: string[] = []
-                
-                // Add class for Google Calendar events
-                if (task?.googleEvent) {
-                  classNames.push('google-calendar-event')
-                }
-                
-                return classNames
-              }}
-              eventContent={(info) => {
-                // We'll let TheCalendarEvent component handle all event rendering
-                try {
-                  return <TheCalendarEvent info={info} />
-                } catch (error) {
-                  console.error("Error rendering event:", error, info);
-                  return <div className="p-1 text-xs">{info.event.title || 'Event error'}</div>
-                }
-              }}
-              eventTimeFormat={FULL_CALENDAR_24HOUR_FORMAT}
-            />
-          )
-        } catch (error) {
-          handleError(error);
-          return (
-            <div className="flex h-full w-full flex-col items-center justify-center text-center p-4">
-              <h3 className="text-xl font-semibold mb-2">Calendar Error</h3>
-              <p className="mb-4">There was a problem rendering the calendar.</p>
-              <button 
-                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                onClick={() => {
-                  setHasError(false);
-                  window.location.reload();
-                }}
-              >
-                Reload Calendar
-              </button>
-            </div>
-          );
-        }
-      })()}
-      <TaskModal.Edit
-        open={editTaskModal.open}
-        task={editTaskModal.task}
-        googleEvent={editTaskModal.googleEvent}
-        onClose={() => setEditTaskModal({ open: false })}
-        onGoogleEventUpdate={(title, start, end, isAllDay) => {
-          const googleEvent = editTaskModal.googleEvent
-          if (googleEvent) {
-            updateEvent(googleEvent.id, title, start, end, isAllDay)
-              .then(() => {
-                syncGoogleEvents()
-                setEditTaskModal({ open: false })
-              })
+      <FullCalendar
+        droppable
+        editable
+        selectable
+        dayMaxEventRows // allow "more" link when too many events
+        weekNumbers
+        weekNumberContent={({ num, date }) => <WeekNumber weekNumber={num} date={date} />}
+        defaultTimedEventDuration="00:30"
+        firstDay={Number(startingDay)}
+        fixedWeekCount={false}
+        ref={calendarRef}
+        height="100%"
+        // locales={[esLocale]}
+        // locale={enLocale}
+        events={[
+          ...calendarEvents,
+          // {
+          //   title: 'test',
+          //   start: '2025-04-14T18:30:00.000Z',
+          //   end: '2025-04-14T18:30:00.000Z',
+          //   display: 'background',
+          // },
+        ]}
+        headerToolbar={false}
+        // headerToolbar={{
+        //   left: 'prev,next',
+        //   center: 'title',
+        //   right: 'dayGridMonth,timeGridWeek',
+        // }}
+        initialView={app.calendarView}
+        dayHeaderClassNames="!border-x-0"
+        plugins={[timeGridPlugin, interactionPlugin, dayGridPlugin, rrulePlugin]}
+        eventTimeFormat={FULL_CALENDAR_24HOUR_FORMAT}
+        slotLabelFormat={FULL_CALENDAR_24HOUR_FORMAT}
+        datesSet={(info) => {
+          onCalendarTitleChange(info.view.title)
+        }}
+        // drag external kanban element to calendar
+        eventReceive={(info) => {
+          onEventScheduleUpdate(info)
+          track('Calendar: Receive Event', { calendarView: info.view.type })
+        }}
+        // resize duration
+        eventResize={(info) => {
+          onEventScheduleUpdate(info)
+          track('Calendar: Resize Event', { calendarView: info.view.type })
+        }}
+        // drag move
+        eventDrop={(info) => {
+          onEventScheduleUpdate(info)
+          track('Calendar: Move Event', { calendarView: info.view.type })
+        }}
+        // click event
+        eventClick={(info) => {
+          if (info.jsEvent?.ctrlKey) {
+            onEventCtrlClick(info)
+          } else {
+            onEventClick(info)
           }
+          track('Calendar: Click Event', { calendarView: info.view.type })
         }}
-        onGoogleEventDelete={(eventId) => {
-          handleDeleteGoogleEvent(eventId)
-          setEditTaskModal({ open: false })
+        select={(info) => {
+          // prevent click week number to create task
+          // @ts-expect-error type correctly
+          if (info.jsEvent?.target?.className?.includes('faiz-week-number')) return
+          track('Calendar: Select Event', { calendarView: info.view.type })
+          onSelect(info)
+        }}
+        eventContent={(info) => <TheCalendarEvent info={info} />}
+        views={{
+          timeGridWeek: {
+            // dayMaxEvents: true,
+            nowIndicator: true,
+            scrollTime: dayjs().subtract(1, 'hour').format('HH:mm:ss'),
+            dayHeaderContent: (date) => {
+              const day = dayjs(date.date)
+              const isWeekend = day.day() === 6 || day.day() === 0
+              return (
+                <div
+                  className={clsx(
+                    'flex h-[34px] items-center gap-1',
+                    isWeekend ? 'text-gray-400 dark:text-gray-400' : 'text-gray-700 dark:text-gray-300',
+                  )}
+                >
+                  {day.format('ddd')}
+                  <span
+                    className={cn(
+                      'flex h-6 w-6 items-center justify-center',
+                      date.isToday ? 'rounded bg-teal-400 text-white' : '',
+                    )}
+                  >
+                    {day.format('DD')}
+                  </span>
+                </div>
+              )
+            },
+          },
         }}
       />
-      <TaskModal.Create
-        open={createTaskModal.open}
-        initialData={createTaskModal.open ? createTaskModal.initialData : undefined}
-        onClose={() => setCreateTaskModal({ open: false })}
-        googleCalendarEnabled={googleCalendarEnabled}
-        onCreateGoogleEvent={handleCreateGoogleEvent}
-      />
+      {editTaskModal.task ? (
+        <TaskModal
+          key={editTaskModal.task.id}
+          open={editTaskModal.open}
+          onCancel={() => setEditTaskModal({ open: false })}
+          info={{
+            type: 'edit',
+            initialTaskData: editTaskModal.task,
+          }}
+          onOk={() => {
+            setEditTaskModal({ open: false })
+          }}
+          onDelete={() => {
+            setEditTaskModal({ open: false })
+          }}
+        />
+      ) : null}
+      {createTaskModal.open ? (
+        <TaskModal
+          open={createTaskModal.open}
+          onOk={() => {
+            setCreateTaskModal({ open: false })
+          }}
+          onCancel={() => setCreateTaskModal({ open: false })}
+          info={{ type: 'create', initialData: createTaskModal.initialData }}
+        />
+      ) : null}
     </div>
   )
 }
-
-export default forwardRef(Calendar)
 
 export type CalendarHandle = {
   prev: () => void
@@ -503,5 +335,5 @@ export type CalendarHandle = {
   getDate: () => Date
   changeView: (view: CalendarView) => void
   navToday: () => void
-  syncGoogleCalendar: () => void
 }
+export default forwardRef<CalendarHandle, CalendarProps>(Calendar)
