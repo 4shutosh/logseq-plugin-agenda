@@ -77,11 +77,13 @@ export const copyToClipboard = (text: string) => {
 
 // 监听 esc 按钮
 export const listenEsc = (callback: () => void) => {
-  document.addEventListener('keyup', (e) => {
-    if (e.key === 'Escape') {
-      callback()
+  const isMac = getOS() === 'mac'
+  document.addEventListener('keydown', (e) => {
+    const mainModifierKey = isMac ? e.metaKey : e.ctrlKey
+    if (e.code === 'KeyW' && mainModifierKey) {
+      callback();
     }
-  })
+  });
 }
 
 // 判断是 windows mac linux

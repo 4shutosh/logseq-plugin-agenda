@@ -84,8 +84,8 @@ const Settings: React.FC<{
       const bgColor = get(changedValues, [key, 'bgColor'])
       if (bgColor) {
         const textColor = autoTextColor(bgColor)
-        settingForm.setFieldValue([key, 'textColor'], textColor)
-        settingForm.setFieldValue([key, 'borderColor'], bgColor)
+        settingForm.setFieldValue([key as 'logKey' | 'journal', 'textColor'], textColor)
+        settingForm.setFieldValue([key as 'logKey' | 'journal', 'borderColor'], bgColor)
         set(_allValues, [key, 'textColor'], textColor)
         set(_allValues, [key, 'borderColor'], bgColor)
       }
@@ -95,8 +95,8 @@ const Settings: React.FC<{
       const bgColor = get(changedValues, [key, index, 'bgColor'])
       if (bgColor) {
         const textColor = autoTextColor(bgColor)
-        settingForm.setFieldValue([key, index, 'textColor'], textColor)
-        settingForm.setFieldValue([key, index, 'borderColor'], bgColor)
+        settingForm.setFieldValue([key as 'projectList' | 'dailyLogTagList' | 'calendarList' | 'subscriptionList', index, 'textColor'], textColor)
+        settingForm.setFieldValue([key as 'projectList' | 'dailyLogTagList' | 'calendarList' | 'subscriptionList', index, 'borderColor'], bgColor)
         set(_allValues, [key, index, 'textColor'], textColor)
         set(_allValues, [key, index, 'borderColor'], bgColor)
       }
