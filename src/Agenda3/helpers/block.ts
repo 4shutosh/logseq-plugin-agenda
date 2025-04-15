@@ -34,6 +34,53 @@ const insertScheduled = (content: string, scheduled: string) => {
 }
 
 /**
+ * Helper function to get a specific block by content - improved to be more robust
+ */
+// const getSpecificBlockByContent = async (pageName: string, blockContent: string) => {
+//   const blocks = await logseq.Editor.getPageBlocksTree(pageName)
+
+//   const findBlockRecursively = (blocks: any[]): any | null => {
+//     for (const block of blocks) {
+//       if (block.content.trim() === blockContent.trim()) {
+//         return block
+//       }
+//       if (block.children?.length) {
+//         const found = findBlockRecursively(block.children)
+//         if (found) return found
+//       }
+//     }
+//     return null
+//   }
+
+//   return findBlockRecursively(blocks)
+// }
+
+/**
+ * Check if a page is a journal page and get/create "Agenda for the day" block
+ * Now with improved block finding
+ */
+const getOrCreateAgendaForTheDayBlock = async (pageName: string) => {
+  const page = await logseq.Editor.getPage(pageName)
+  if (!page) return { agendaBlock: null }
+
+  const blocks = await logseq.Editor.getPageBlocksTree(pageName)
+
+  const agendaBlock = blocks.find((b) => b.content?.trim().toLowerCase() === 'agenda for the day')
+
+  if (agendaBlock) {
+    return { agendaBlock }
+  }
+
+  // Create bullet point with a heading inside
+  const newBlock = await logseq.Editor.insertBlock(page.uuid, 'Agenda for the day', {
+    isPageBlock: true,
+    sibling: false,
+    before: false,
+  })
+  return { agendaBlock: newBlock }
+}
+
+/**
  * change task date and estimated time
  */
 export const updateBlockDateInfo = async ({
@@ -181,9 +228,6 @@ export const deleteBlogTimeLog = async (uuid: string, index: number) => {
   return logseq.Editor.updateBlock(uuid, newContent)
 }
 
-/**
- * create task
- */
 export const createTaskBlock = async (taskInfo: CreateAgendaTask) => {
   const { title, allDay, start, deadline, end, estimatedTime, projectId, bindObjectiveId } = taskInfo
 
@@ -192,7 +236,7 @@ export const createTaskBlock = async (taskInfo: CreateAgendaTask) => {
     end,
     bindObjectiveId,
   })
-  // const
+
   const content = [
     `${getTodoTag()} ${title}`,
     start ? `SCHEDULED: <${start.format(allDay ? SCHEDULED_DATE_FORMATTER : SCHEDULED_DATETIME_FORMATTER)}>` : null,
@@ -208,11 +252,29 @@ export const createTaskBlock = async (taskInfo: CreateAgendaTask) => {
 
   const targetProjectId = projectId ? projectId : (await createTodayJournalPage()).uuid
 
-  const block = await logseq.Editor.insertBlock(targetProjectId, content, {
-    isPageBlock: true,
-  })
-  if (!block) return Promise.reject(new Error('Failed to create task block'))
-  return logseq.Editor.getBlock(block.uuid)
+  const targetPage = await logseq.Editor.getPage(targetProjectId)
+  if (!targetPage) return Promise.reject(new Error('Target page not found'))
+
+  const { agendaBlock } = await getOrCreateAgendaForTheDayBlock(targetPage.originalName)
+
+  if (agendaBlock) {
+    const block = await logseq.Editor.insertBlock(agendaBlock.uuid, content, {
+      sibling: false,
+    })
+
+    // await logseq.Editor.setBlockCollapsed(agendaBlock.uuid, true)
+
+    if (!block) return Promise.reject(new Error('Failed to create task block'))
+    return logseq.Editor.getBlock(block.uuid)
+  } else {
+    const block = await logseq.Editor.insertBlock(targetProjectId, content, {
+      isPageBlock: true,
+      sibling: false,
+      before: false,
+    })
+    if (!block) return Promise.reject(new Error('Failed to create task block'))
+    return logseq.Editor.getBlock(block.uuid)
+  }
 }
 
 export function generateTimeLogText({ start, end }: { start: Dayjs; end: Dayjs }) {
@@ -220,12 +282,6 @@ export function generateTimeLogText({ start, end }: { start: Dayjs; end: Dayjs }
     LOGBOOK_CLOCK_FORMATTER,
   )}] =>  ${secondsToHHmmss(end.diff(start, 'second'))}`
 }
-// function generateTimeLogsText(timeLogs?: { start: Dayjs; end: Dayjs }[]) {
-//   if (!Array.isArray(timeLogs)) return ''
-//   // 若返回为空，则不会更新原有的 logbook
-//   if (timeLogs.length === 0) return [':LOGBOOK:', ':END:'].join('\n')
-//   return [':LOGBOOK:', ...timeLogs.map(generateTimeLogText), ':END:'].join('\n')
-// }
 
 /**
  * update task
@@ -249,14 +305,28 @@ export const updateTaskBlock = async (taskInfo: AgendaTaskWithStartOrDeadline & 
 
   const page = await logseq.Editor.getPage(originalBlock.page.id)
   if (!page) return Promise.reject(new Error('Page not found'))
+
   if (page.uuid !== projectId) {
-    // move task to new page's bottom
+    // move task to new page
     const targetPageId = projectId ? projectId : (await createTodayJournalPage()).uuid
-    const blocks = await logseq.Editor.getPageBlocksTree(targetPageId)
-    const targetBlockId = blocks.length > 0 ? blocks[blocks.length - 1].uuid : targetPageId
-    await logseq.Editor.moveBlock(id, targetBlockId, {
-      children: false,
-    })
+    const targetPage = await logseq.Editor.getPage(targetPageId)
+    if (!targetPage) return Promise.reject(new Error('Target page not found'))
+
+    const { agendaBlock } = await getOrCreateAgendaForTheDayBlock(targetPage.originalName)
+
+    if (agendaBlock) {
+      // For journal pages, move under "Agenda for the day" block
+      await logseq.Editor.moveBlock(id, agendaBlock.uuid, {
+        children: true,
+      })
+    } else {
+      // For non-journal pages, use the original behavior
+      const blocks = await logseq.Editor.getPageBlocksTree(targetPageId)
+      const targetBlockId = blocks.length > 0 ? blocks[blocks.length - 1].uuid : targetPageId
+      await logseq.Editor.moveBlock(id, targetBlockId, {
+        children: false,
+      })
+    }
   }
 
   return logseq.Editor.getBlock(id)
@@ -496,11 +566,23 @@ export function updateBlockTimeLogText(blockContent: string, timeLogs: { start: 
   return blockContent.replace(LOGBOOK_REGEX, logbookText)
 }
 
+/**
+ * create objective block
+ */
 export async function createTodayJournalPage() {
   const { preferredDateFormat } = await logseq.App.getUserConfigs()
   const journalName = format(dayjs().valueOf(), preferredDateFormat)
-  const journalPage = await logseq.Editor.createPage(journalName, {}, { journal: true })
-  if (!journalPage) return Promise.reject(new Error('Failed to create journal page'))
+
+  // Check if the journal page already exists
+  let journalPage = await logseq.Editor.getPage(journalName)
+
+  // Create it only if it doesn't exist
+  if (!journalPage) {
+    journalPage = await logseq.Editor.createPage(journalName, {}, { journal: true })
+    if (!journalPage) return Promise.reject(new Error('Failed to create journal page'))
+  }
+
+  // We don't create the agenda block here anymore - this will be handled in createObjectiveBlock
   return journalPage
 }
 
@@ -524,22 +606,31 @@ export const transformBlockToBlockFromQuery = async (block: BlockEntity | null):
   }
 }
 
-/**
- * create objective block
- */
 export const createObjectiveBlock = async (objective: CreateObjectiveForm) => {
   const { title, objective: objectiveInfo } = objective
-  const AGENDA_DRAWER = genAgendaDrawerText({
-    objective: objectiveInfo,
-  })
+  const AGENDA_DRAWER = genAgendaDrawerText({ objective: objectiveInfo })
   const content = [`${getTodoTag()} ${title}`, AGENDA_DRAWER].filter(Boolean).join('\n')
-  const block = await logseq.Editor.insertBlock((await createTodayJournalPage()).uuid, content, {
-    isPageBlock: true,
-    customUUID: await logseq.Editor.newBlockUUID(),
-  })
-  if (!block) return Promise.reject(new Error('Failed to create objective block'))
-  return logseq.Editor.getBlock(block.uuid)
+
+  // Create/get today’s journal page
+  const journalPage = await createTodayJournalPage()
+
+  // Fetch agenda block
+  const { agendaBlock } = await getOrCreateAgendaForTheDayBlock(journalPage.originalName)
+
+  if (agendaBlock) {
+    // Insert as child block (indented under Agenda)
+    const block = await logseq.Editor.insertBlock(agendaBlock.uuid, content, {
+      sibling: false,
+      customUUID: await logseq.Editor.newBlockUUID(),
+    })
+
+    if (!block) return Promise.reject(new Error('Failed to create objective block'))
+    return logseq.Editor.getBlock(block.uuid)
+  }
+
+  return Promise.reject(new Error('Failed to find or create agenda block'))
 }
+
 /**
  * update objective block
  */
