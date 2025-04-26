@@ -139,5 +139,6 @@ export const transformGoogleEventToCalendarEvent = (task: AgendaTaskWithStartOrD
     editable: true, // Make Google Calendar events editable
     color: bgColor || project?.properties?.['agenda-color'] || '#4285F4', // Use Google Calendar colors
     textColor: task.color || '#FFFFFF',
+    isGCalEvent: true,
   };
 }

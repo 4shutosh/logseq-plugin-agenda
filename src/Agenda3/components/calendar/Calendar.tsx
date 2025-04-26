@@ -6,7 +6,7 @@ import rrulePlugin from '@fullcalendar/rrule'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 
 import { useTheme } from '@/Agenda3/components/ThemeProvider'
@@ -19,7 +19,8 @@ import { appAtom } from '@/Agenda3/models/app'
 import { googleCalendarTasks, tasksWithStartOrDeadlineAtom } from '@/Agenda3/models/entities/tasks'
 import { logseqAtom } from '@/Agenda3/models/logseq'
 import { settingsAtom } from '@/Agenda3/models/settings'
-// import useTheme from '@/hooks/useTheme'
+import { updateGoogleEvent } from '@/services/googleCalendar'
+import useGoogleCalendar from '@/Agenda3/hooks/useGoogleCalendar'
 import type { AgendaTaskWithStart } from '@/types/task'
 import { cn } from '@/util/util'
 
@@ -40,6 +41,8 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
   // const [currentView, setCurrentView] = useState<CalendarView>('dayGridMonth')
   const calendarRef = useRef<FullCalendar>(null)
   const { currentTheme: theme } = useTheme()
+  const [googleEvents, setGoogleEvents] = useAtom(googleCalendarTasks)
+  const { syncGoogleEvents } = useGoogleCalendar()
   const app = useAtomValue(appAtom)
   const { updateEntity } = useAgendaEntities()
   const tasksWithStartOrDeadline = useAtomValue(tasksWithStartOrDeadlineAtom)
@@ -51,13 +54,8 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
     settings.viewOptions?.hideCompleted ? task.status === 'todo' : true,
   )
 
-  const googleEvents = useAtomValue(googleCalendarTasks)
   const googleEventsMapped = googleEvents?.
-    map((task) => transformGoogleEventToCalendarEvent(task), {
-      showFirstEventInCycleOnly: settings.viewOptions?.showFirstEventInCycleOnly,
-      showTimeLog: settings.viewOptions?.showTimeLog,
-      groupType,
-    }).flat()
+    map((task) => transformGoogleEventToCalendarEvent(task), {}).flat()
   
   // const now = dayjs()
   const showEventsMapped = [...showTasks]
@@ -103,6 +101,7 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
   const onEventScheduleUpdate = (info: EventResizeDoneArg | EventReceiveArg | EventDropArg) => {
     // const calendarApi = calendarRef.current?.getApi()
     const { start, end, id: blockUUID, allDay, extendedProps } = info.event
+    const { isGCalEvent } = extendedProps
     const startDay = dayjs(start)
     // const estimatedTime = dayjs(end).diff(start, 'minute')
     const endDay = dayjs(end).subtract(1, 'day')
@@ -114,17 +113,88 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
       allDay,
     }
     try {
-      updateEntity({ type: 'task-date', id: blockUUID, data: dateInfo })
-      // const event = calendarApi?.getEventById(blockUUID)
-      // if (event) {
-      //   event.setProp('extendedProps', {
-      //     ...event.extendedProps,
-      //     ...dateInfo,
-      //   })
-      // }
+      if (isGCalEvent && extendedProps) {
+        // Cast extendedProps to the correct type to access task properties
+        const task = extendedProps as AgendaTaskWithStart;
+        // Handle Google Calendar event update
+        try {
+          // Determine the Google Calendar event ID
+          let googleEventId;
+          
+          if (task.googleCalendarId) {
+            // Use the googleCalendarId property from the task
+            googleEventId = task.googleCalendarId;
+          } else if (blockUUID.startsWith('gcal_')) {
+            // Extract from blockUUID for backward compatibility
+            googleEventId = blockUUID.replace('gcal_', '');
+          } else {
+            console.error('[GoogleCalendar] Cannot determine Google Calendar event ID');
+            info.revert();
+            return;
+          }
 
-      // refreshAllTasks()
-      // 其他天移动到今天的 timebox，需要对应移动 kanban
+          let colorId;
+          // Use type assertion to safely access properties
+          const taskAny = task as any;
+          if (taskAny.extendedProps && taskAny.extendedProps.originalEvent && taskAny.extendedProps.originalEvent.colorId) {
+            colorId = taskAny.extendedProps.originalEvent.colorId;
+          } else if (taskAny.originalEvent && taskAny.originalEvent.colorId) {
+            colorId = taskAny.originalEvent.colorId;
+          }
+          
+          const isAllDay = task.allDay || false;
+          
+          // Ensure start and end are Date objects for updateGoogleEvent
+          const startDate = start ? dayjs(start).toDate() : new Date();
+          const endDate = end ? dayjs(end).toDate() : dayjs(startDate).add(30, 'minutes').toDate();
+          
+          // Update event in Google Calendar
+          updateGoogleEvent(googleEventId, task.title || 'Untitled Event', 
+            startDate, endDate, isAllDay, colorId)
+            .then(() => {
+              console.log('[GoogleCalendar] Event updated successfully in Google Calendar API. Updating local state.');
+
+              // Update the local Jotai state
+              setGoogleEvents(prevEvents => 
+                prevEvents.map(event => {
+                  // Identify the correct event (need a reliable ID comparison)
+                  // Assuming googleEventId is derived correctly and matches the event.id used in the atom
+                  let eventIdToCheck = googleEventId; // Use the ID used for the API call
+                  // If blockUUID was used and starts with gcal_, use that for matching atom state
+                  if (blockUUID.startsWith('gcal_')) {
+                    eventIdToCheck = blockUUID;
+                  }
+
+                  if (event.id === eventIdToCheck) {
+                    return {
+                      ...event,
+                      start: dayjs(startDate), // Convert back to Dayjs for atom state
+                      end: dayjs(endDate),
+                      allDay: isAllDay,
+                    };
+                  }
+                  return event;
+                })
+              );
+
+              // Also update the event directly in FullCalendar's state for immediate visual feedback
+              info.event.setStart(startDate);
+              info.event.setEnd(endDate);
+              info.event.setAllDay(isAllDay);
+              console.log('[GoogleCalendar] Local state and FullCalendar event updated.');
+            })
+            .catch((error) => {
+              console.error('[GoogleCalendar] Error updating event:', error);
+              info.revert();
+            });
+        } catch (error) {
+          console.error('[GoogleCalendar] Error updating event:', error);
+          info.revert();
+        }
+        return;
+      } else {
+        updateEntity({ type: 'task-date', id: blockUUID, data: dateInfo })
+      }
     } catch (error) {
       logseq.UI.showMsg('resize failed')
       info.revert()

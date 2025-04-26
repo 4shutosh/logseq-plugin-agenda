@@ -2,8 +2,7 @@ import { ThirdPartyDraggable } from '@fullcalendar/interaction'
 import { Progress } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useAtomValue } from 'jotai'
-import { useEffect, useImperativeHandle, useRef } from 'react'
-import React from 'react'
+import React, { useState, useEffect, useImperativeHandle, useRef } from 'react'
 import { ReactSortable } from 'react-sortablejs'
 
 import { track } from '@/Agenda3/helpers/umami'
@@ -24,19 +23,27 @@ const Column = ({ day, tasks, allKanbanItems }: ColumnProps, ref) => {
   // bind draggable
   const hadBindDropRef = useRef(false)
 
+  // Local state for tasks within this column, managed by ReactSortable
+  const [localTasks, setLocalTasks] = useState<AgendaTaskWithStartOrDeadline[]>(tasks);
+
+  // Sync local state when the tasks prop changes from parent
+  useEffect(() => {
+    setLocalTasks(tasks);
+  }, [tasks]);
+
   const app = useAtomValue(appAtom)
 
   const today = dayjs()
   const dateStr = day.format('MM-DD ddd')
 
   const isToday = day.isSame(today, 'day')
-  const doneTasks = tasks.filter((task) => task.status === 'done')
-  const undoneTasks = tasks.filter((task) => task.status !== 'done')
-  const _dayTasks = undoneTasks.concat(doneTasks)
-  const estimatedTime = _dayTasks.reduce((acc, task) => {
+  // Calculate metrics based on localTasks
+  const doneTasks = localTasks.filter((task) => task.status === 'done');
+  const undoneTasks = localTasks.filter((task) => task.status !== 'done');
+  const estimatedTime = localTasks.reduce((acc, task) => {
     return acc + (task.estimatedTime ?? DEFAULT_ESTIMATED_TIME)
   }, 0)
-  const actualTime = _dayTasks.reduce((acc, task) => {
+  const actualTime = localTasks.reduce((acc, task) => {
     return acc + (task.actualTime ?? task.estimatedTime ?? DEFAULT_ESTIMATED_TIME)
   }, 0)
 
@@ -44,25 +51,38 @@ const Column = ({ day, tasks, allKanbanItems }: ColumnProps, ref) => {
 
   const onAddTaskByDrag = async (sortableEvent) => {
     console.log('[faiz:] === kanban onAdd', sortableEvent)
+    // setList prop should have already updated localTasks optimistically
     const id = sortableEvent?.item?.dataset?.id
-    const task = allKanbanItems.find((task) => task.id === id)
+    // Find original task data from allKanbanItems prop
+    const taskData = allKanbanItems.find((task) => task.id === id)
     // TODO: 支持拖拽修改 deadline
-    if (!task?.start) return logseq.UI.showMsg('Drag task without start date is not supported', 'error')
-    if (!task || !id) return logseq.UI.showMsg('task id not found', 'error')
+    if (!taskData?.start) return logseq.UI.showMsg('Drag task without start date is not supported', 'error')
+    if (!taskData || !id) return logseq.UI.showMsg('task id not found', 'error')
     let startDay = day
     // remain time info
-    if (task.allDay === false) {
-      startDay = replaceDateInfo(task.start, day)
+    if (taskData.allDay === false) {
+      startDay = replaceDateInfo(taskData.start, day)
     }
-    updateEntity({
-      type: 'task-date',
-      id,
-      data: {
-        start: startDay,
-        allDay: task.allDay,
-      },
-    })
-    track('KanBan: Drag Task')
+    try {
+      // Trigger background update of Logseq block and global atom state
+      await updateEntity({
+        type: 'task-date',
+        id,
+        data: {
+          start: startDay,
+          allDay: taskData.allDay, // Use original allDay status
+          // Preserve estimated time
+          estimatedTime: taskData.estimatedTime,
+        },
+      });
+      console.log(`[Agenda3] Task ${id} moved to ${day.format('YYYY-MM-DD')} successfully.`);
+      track('KanBan: Drag Task');
+    } catch (error) {
+      console.error(`[Agenda3] Failed to move task ${id} to ${day.format('YYYY-MM-DD')}`, error);
+      logseq.UI.showMsg('Failed to update task date', 'error');
+      // Revert? The global state update might fix it, or could cause issues.
+      // Consider forcing a refresh or explicitly reverting localTasks if needed.
+    }
   }
 
   useImperativeHandle(ref, () => ({
@@ -98,7 +118,7 @@ const Column = ({ day, tasks, allKanbanItems }: ColumnProps, ref) => {
             status="success"
             className="!m-0"
             showInfo={false}
-            percent={(doneTasks.length / _dayTasks.length) * 100}
+            percent={(doneTasks.length / localTasks.length) * 100}
           />
         ) : (
           <div className="h-[24px]"></div>
@@ -115,22 +135,15 @@ const Column = ({ day, tasks, allKanbanItems }: ColumnProps, ref) => {
         {/* ========= Tasks List ========= */}
         <ReactSortable
           forceFallback // 该属性如果不加就无法与 fullcalendar 交互
-          className={cn('flex flex-1 flex-col gap-2 overflow-y-auto', { 'pb-28': _dayTasks.length === 0 })}
+          className={cn('flex flex-1 flex-col gap-2 overflow-y-auto', { 'pb-28': localTasks.length === 0 })}
           group="shared"
           dragClass="dragged-mirror-element"
           draggable=".droppable-task-element"
-          list={_dayTasks}
-          // onMove={(event, originalEvent) => {
-          //   console.log('[faiz:] === xxx onMove', event)
-          //   console.log('[faiz:] === xxx originalEvent', originalEvent)
-          //   return true
-          // }}
-          setList={() => {
-            // console.log(`[faiz:] === setList ${day.format('MM-DD ddd')}`, list)
-          }}
+          list={localTasks}
+          setList={setLocalTasks}
           onAdd={onAddTaskByDrag}
         >
-          {_dayTasks.map((task) => (
+          {localTasks.map((task) => (
             <TaskCard key={task.id} task={task} />
           ))}
         </ReactSortable>

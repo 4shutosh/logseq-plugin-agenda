@@ -1,11 +1,11 @@
 import { LeftOutlined, RightOutlined } from '@ant-design/icons'
-import interactionPlugin from '@fullcalendar/interaction'
+import interactionPlugin, { type EventReceiveArg, type EventResizeDoneArg } from '@fullcalendar/interaction'
 import FullCalendar from '@fullcalendar/react'
 import rrulePlugin from '@fullcalendar/rrule'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import { Button, message, Modal } from 'antd'
 import dayjs from 'dayjs'
-import { useAtomValue } from 'jotai'
+import { useAtom } from 'jotai'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MdSchedule } from 'react-icons/md'
@@ -22,7 +22,8 @@ import { settingsAtom } from '@/Agenda3/models/settings'
 import { DEFAULT_ESTIMATED_TIME } from '@/constants/agenda'
 import type { CalendarEvent } from '@/types/fullcalendar'
 import { cn } from '@/util/util'
-import { updateEvent, deleteEvent, createEvent } from '@/services/googleCalendar'
+import { updateGoogleEvent, deleteEvent, createEvent } from '@/services/googleCalendar'
+import type { EventApi, EventDropArg } from '@fullcalendar/core'
 import type { AgendaTaskWithStart, AgendaTaskWithStartOrDeadline } from '@/types/task'
 
 import TaskModal from '../modals/TaskModal'
@@ -31,7 +32,7 @@ import TheCalendarEvent from './TheCalendarEvent'
 import s from './timebox.module.less'
 
 type FullCalendarEventInfo = {
-  event: CalendarEvent
+  event: EventApi
   oldEvent: CalendarEvent
   relatedEvents: unknown[]
   revert: () => void
@@ -50,12 +51,12 @@ const FULL_CALENDAR_24HOUR_FORMAT = {
 const TimeBox = ({ onChangeType }: { onChangeType?: () => void }) => {
   const { t } = useTranslation()
   const { currentTheme: theme } = useTheme()
-  const settings = useAtomValue(settingsAtom)
+  const settings = useAtom(settingsAtom)[0]
   const groupType = settings.selectedFilters?.length ? 'filter' : 'page'
   const calendarRef = useRef<FullCalendar>(null)
   const { updateEntity, addNewEntity } = useAgendaEntities()
-  const recentTasks = useAtomValue(recentTasksAtom)
-  const googleEvents = useAtomValue(googleCalendarTasks)
+  const [recentTasks] = useAtom(recentTasksAtom)
+  const [googleEvents, setGoogleEvents] = useAtom(googleCalendarTasks)
   const { syncGoogleEvents } = useGoogleCalendar()
   const now = dayjs()
   
@@ -118,14 +119,14 @@ const TimeBox = ({ onChangeType }: { onChangeType?: () => void }) => {
 
   const onEventScheduleUpdate = (info: unknown) => {
     const calendarApi = calendarRef.current?.getApi()
-    const _info = info as FullCalendarEventInfo
-    console.log('[faiz:] === eventResize', _info)
-    const { start, end, id: blockUUID, extendedProps: task } = _info.event
+    const _info = info as EventDropArg | EventResizeDoneArg
+    const { start, end, id: blockUUID, extendedProps } = _info.event
+    const task = extendedProps || {};
     const startDay = dayjs(start)
     const span = dayjs(end).diff(start, 'minute')
     
     // Check if this is a Google Calendar event
-    const isGoogleEvent = blockUUID.startsWith('gcal_') || task.googleCalendarId;
+    const isGoogleEvent = blockUUID.startsWith('gcal_') || task?.googleCalendarId;
     
     if (isGoogleEvent) {
       // Handle Google Calendar event update
@@ -145,27 +146,51 @@ const TimeBox = ({ onChangeType }: { onChangeType?: () => void }) => {
           return;
         }
         
-        const isAllDay = task.allDay || false;
+        const isAllDay = task?.allDay || false;
         
         // Extract the colorId from the original event to preserve the color
         let colorId;
-        if (task.extendedProps && task.extendedProps.originalEvent && task.extendedProps.originalEvent.colorId) {
-          colorId = task.extendedProps.originalEvent.colorId;
-        } else if (task.originalEvent && task.originalEvent.colorId) {
-          colorId = task.originalEvent.colorId;
-        }
+        // The original Google Calendar event's colorId should be stored on the task object itself (extendedProps)
+        // during the conversion process. Access it directly.
+        colorId = task?.colorId;
         
         console.log('[GoogleCalendar] Using colorId for update:', colorId);
         
         // Update event in Google Calendar
-        updateEvent(googleEventId, task.title || 'Untitled Event',
-           start, end, isAllDay, colorId)
+        updateGoogleEvent(googleEventId, task.title || 'Untitled Event',
+           start ?? new Date(), end ?? new Date(Date.now() + 30 * 60000), isAllDay, colorId)
           .then(() => {
-            console.log('[GoogleCalendar] Event updated successfully in Google Calendar');
-            // Refresh Google Calendar events
-            if (syncGoogleEvents) {
-              syncGoogleEvents();
-            }
+            console.log('[GoogleCalendar] Event updated successfully in Google Calendar API. Updating local state.');
+
+            // Update the local Jotai state
+            setGoogleEvents(prevEvents =>
+              prevEvents.map(event => {
+                // Identify the correct event
+                let eventIdToCheck = googleEventId;
+                if (blockUUID.startsWith('gcal_')) {
+                  eventIdToCheck = blockUUID;
+                }
+
+                if (event.id === eventIdToCheck) {
+                  return {
+                    ...event,
+                    start: dayjs(start), // Convert back to Dayjs
+                    end: dayjs(end), // Convert back to Dayjs
+                    allDay: isAllDay,
+                  };
+                }
+                return event;
+              })
+            );
+
+            // Also update the event directly in FullCalendar's state
+            // Ensure start/end are Date objects for FullCalendar API
+            const startDate = start instanceof Date ? start : dayjs(start).toDate();
+            const endDate = end instanceof Date ? end : dayjs(end).toDate();
+            _info.event.setStart(startDate);
+            _info.event.setEnd(endDate);
+            _info.event.setAllDay(isAllDay);
+            console.log('[GoogleCalendar] Local state and FullCalendar event updated in TimeBox.');
           })
           .catch((error) => {
             console.error('[GoogleCalendar] Error updating event:', error);

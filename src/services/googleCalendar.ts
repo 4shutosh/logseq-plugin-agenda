@@ -529,6 +529,7 @@ export const convertGoogleEventsToAgendaTask = (events: any[]): (AgendaTaskWithS
   bgColor?: string;
   color?: string;
   borderColor?: string;
+  colorId?: string;
 })[] => {
   return events.map(event => {
     const start = event.start.dateTime || event.start.date;
@@ -585,6 +586,7 @@ export const convertGoogleEventsToAgendaTask = (events: any[]): (AgendaTaskWithS
       bgColor: string;
       color: string;
       borderColor: string;
+      colorId?: string;
     } = {
       id: `gcal_${event.id}`, // Prefix to identify Google Calendar events
       title: event.summary || 'Untitled Event',
@@ -607,6 +609,7 @@ export const convertGoogleEventsToAgendaTask = (events: any[]): (AgendaTaskWithS
         source: 'google_calendar',
         originalEvent: event
       },
+      colorId: event.colorId,
       // Add colors for styling in calendar
       bgColor: bgColor,
       color: textColor,
@@ -728,7 +731,7 @@ export const createEvent = async (title: string, start: Date, end: Date, isAllDa
 /**
  * Update an existing event in Google Calendar
  */
-export const updateEvent = async (eventId: string, title: string, 
+export const updateGoogleEvent = async (eventId: string, title: string, 
   start: Date, end: Date, isAllDay: boolean = false, colorId?: string) => {
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {

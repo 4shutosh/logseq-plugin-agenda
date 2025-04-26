@@ -22,4 +22,5 @@ export type CalendarEvent = {
   color?: string
   textColor?: string
   duration?: { minute: number } // rrule event duration
+  isGCalEvent?: boolean
 }
