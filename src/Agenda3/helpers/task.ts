@@ -207,6 +207,8 @@ export const transformBlockToAgendaEntity = async (
   const objective = agendaDrawer?.objective
   // bindObjectiveId
   const bindObjectiveId = agendaDrawer?.bindObjectiveId
+  // Google Calendar ID
+  const googleCalendarId = agendaDrawer?.googleCalendarId
 
   /**
    * parse logbook
@@ -293,6 +295,7 @@ export const transformBlockToAgendaEntity = async (
     doneHistory,
     objective,
     bindObjectiveId,
+    googleCalendarId,
     rawBlock: block,
   }
 }

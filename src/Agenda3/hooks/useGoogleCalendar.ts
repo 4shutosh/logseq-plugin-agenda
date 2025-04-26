@@ -68,13 +68,18 @@ const useGoogleCalendar = () => {
       const schedules = convertGoogleEventsToAgendaTask(events)
       console.log(`[GoogleCalendar Debug] Converted to ${schedules.length} schedules`)
       
-      // Apply colors from settings
+      // Apply colors from settings ONLY if the event doesn't have its own colorId
       if (settings.googleCalendar?.calendar) {
         const { bgColor, textColor, borderColor } = settings.googleCalendar.calendar
         schedules.forEach((schedule: any) => {
-          schedule.bgColor = bgColor
-          schedule.color = textColor
-          schedule.borderColor = borderColor
+          // Only override colors if the event doesn't have its own colorId
+          const originalEvent = schedule.extendedProps?.originalEvent
+          if (!originalEvent?.colorId) {
+            schedule.bgColor = bgColor || schedule.bgColor
+            schedule.color = textColor || schedule.color
+            schedule.borderColor = borderColor || schedule.borderColor
+          }
+          schedule.isGCalEvent = true
         })
       }
       
@@ -137,12 +142,38 @@ const useGoogleCalendar = () => {
     return fetchGoogleEvents(startDate, endDate)
   }, [fetchGoogleEvents, settings.googleCalendar?.enabled, isInitialized])
   
-  // Auto sync Google Calendar events when initialized
   useEffect(() => {
     if (isInitialized && settings.googleCalendar?.enabled && settings.googleCalendar?.syncEnabled) {
       syncGoogleEvents()
     }
   }, [isInitialized, syncGoogleEvents, settings.googleCalendar?.enabled, settings.googleCalendar?.syncEnabled])
+
+  useEffect(() => {
+    if (isInitialized && 
+        settings.googleCalendar?.enabled && 
+        settings.googleCalendar?.syncEnabled) {
+      
+      console.log('[GoogleCalendar Debug] Setting up periodic sync interval');
+      
+      const syncIntervalMs = (2) * 60 * 1000;
+      
+      const intervalId = setInterval(() => {
+        console.log('[GoogleCalendar Debug] Running periodic sync');
+        syncGoogleEvents();
+      }, syncIntervalMs);
+      
+      // Clean up interval on unmount or when conditions change
+      return () => {
+        console.log('[GoogleCalendar Debug] Cleaning up sync interval');
+        clearInterval(intervalId);
+      };
+    }
+  }, [
+    isInitialized, 
+    syncGoogleEvents, 
+    settings.googleCalendar?.enabled, 
+    settings.googleCalendar?.syncEnabled,
+  ]);
   
   return {
     googleTasks,
@@ -153,6 +184,4 @@ const useGoogleCalendar = () => {
   }
 }
 
-
-
-export default useGoogleCalendar 
+export default useGoogleCalendar

@@ -25,5 +25,6 @@ export type CreateAgendaTask = { projectId?: string } & Overwrite<
     allDay?: boolean
     estimatedTime?: number
     deadline?: { value: Dayjs; allDay: boolean }
+    googleCalendarId?: string
   }
 >

@@ -2,7 +2,7 @@
  * Google Calendar API Service for Agenda3 plugin
  * Handles authentication, token management, and calendar operations
  */
-import { AgendaTaskWithStartOrDeadline } from '@/types/task';
+import { AgendaTaskWithStartOrDeadline, AgendaTaskWithStart } from '@/types/task';
 import { message } from 'antd';
 import dayjs from 'dayjs';
 
@@ -46,9 +46,8 @@ const saveToken = (token: any) => {
     // Save the token itself
     localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(token));
     
-    // Calculate and save expiration time - Google tokens typically expire in 1 hour (3600 seconds)
-    // We'll set it to 50 minutes to be safe
-    const expiryTime = Date.now() + 3000000; // 50 minutes in milliseconds
+    // Calculate and save expiration time - Set to 30 days
+    const expiryTime = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
     localStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString());
     
     console.log('[GoogleCalendar] Token saved to localStorage, expires:', new Date(expiryTime).toLocaleString());
@@ -466,6 +465,14 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
   }
   
   try {
+    // Fetch calendar colors if we haven't done so yet
+    if (!fetchedCalendarColors) {
+      fetchedCalendarColors = await fetchGoogleCalendarColors();
+      if (fetchedCalendarColors) {
+        console.log('[GoogleCalendar] Successfully fetched calendar colors');
+      }
+    }
+    
     console.log('[GoogleCalendar] Fetching events:', {
       calendarId: 'primary',
       timeMin: startDate.toISOString(),
@@ -484,6 +491,8 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
     
     console.log('[GoogleCalendar] Events fetched successfully:', 
       response.result.items?.length || 0, 'events');
+
+    console.log('events', response)
     
     // Save token after successful API call to extend expiry
     const token = gapi.client.getToken();
@@ -513,20 +522,158 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
   }
 };
 
-export const convertGoogleEventsToAgendaTask = (events: any[]): AgendaTaskWithStartOrDeadline[] => {
+export const convertGoogleEventsToAgendaTask = (events: any[]): (AgendaTaskWithStartOrDeadline & {
+  rawBlock: any;
+  isGCalEvent: boolean;
+  extendedProps: any;
+  bgColor?: string;
+  color?: string;
+  borderColor?: string;
+})[] => {
   return events.map(event => {
-    return {
-      id: event.id, // Assuming the event has an id
-      title: event.summary, // Assuming the event has a summary
-      start: dayjs(event.start.dateTime || event.start.date), // Handle both dateTime and date
-      end: event.end ? dayjs(event.end.dateTime || event.end.date) : undefined,
-      bindObjectiveId: undefined, // Set this if you have a way to bind objectives
-      status: 'todo', // Default status, adjust as necessary
-      objective: undefined, // Set this if you have a way to bind objectives
-      deadline: undefined, // Set this if you have a deadline
-    } as AgendaTaskWithStartOrDeadline;
+    const start = event.start.dateTime || event.start.date;
+    const end = event.end?.dateTime || event.end?.date;
+    
+    // Get color from the event or use default
+    let bgColor = '#4285F4';  // Default blue color
+    let textColor = '#FFFFFF'; // Default white text
+    
+    if (event.colorId) {
+      // Try to use fetched colors first if available
+      if (fetchedCalendarColors && fetchedCalendarColors.event && fetchedCalendarColors.event[event.colorId]) {
+        bgColor = fetchedCalendarColors.event[event.colorId].background;
+        textColor = fetchedCalendarColors.event[event.colorId].foreground;
+      } 
+      // Fall back to predefined colors
+      else if (googleCalendarColors[event.colorId]) {
+        bgColor = googleCalendarColors[event.colorId].background;
+        textColor = googleCalendarColors[event.colorId].foreground;
+      }
+    }
+    
+    console.log('[GoogleCalendar] Event colorId:', event.colorId, 'Mapped to bgColor:', bgColor, 'textColor:', textColor);
+    
+    // Create a compatible rawBlock that matches BlockFromQuery structure
+    const rawBlock: any = {
+      id: `gcal_${event.id}`,
+      uuid: `gcal_${event.id}`,
+      content: event.summary || 'Untitled Event',
+      format: 'markdown',
+      marker: 'TODO',
+      left: { id: 0 },
+      parent: { id: 0 },
+      page: {
+        id: 'google_calendar',
+        originalName: 'Google Calendar', 
+        isJournal: false,
+        journalDay: undefined,
+        'journal?': false
+      },
+      properties: {
+        'google-calendar': 'true',
+        'description': event.description || '',
+        'location': event.location || ''
+      },
+      repeated: false,
+      unordered: false
+    };
+    
+    const task: AgendaTaskWithStart & { 
+      rawBlock: any;
+      isGCalEvent: boolean;
+      extendedProps: any;
+      bgColor: string;
+      color: string;
+      borderColor: string;
+    } = {
+      id: `gcal_${event.id}`, // Prefix to identify Google Calendar events
+      title: event.summary || 'Untitled Event',
+      showTitle: event.summary || 'Untitled Event',
+      status: 'todo',
+      allDay: !event.start.dateTime, // If no time component, it's an all-day event
+      start: dayjs(start),
+      end: end ? dayjs(end) : undefined,
+      project: {
+        id: 'google_calendar',
+        originalName: 'Google Calendar',
+        isJournal: false,
+        properties: {
+          'agenda-color': bgColor
+        }
+      },
+      rawBlock: rawBlock,
+      isGCalEvent: true,
+      extendedProps: {
+        source: 'google_calendar',
+        originalEvent: event
+      },
+      // Add colors for styling in calendar
+      bgColor: bgColor,
+      color: textColor,
+      borderColor: bgColor
+    };
+    
+    return task;
   });
 };
+
+/**
+ * Fetch Google Calendar colors directly from the API
+ * This loads the actual color palette used by the calendar
+ */
+export const fetchGoogleCalendarColors = async (): Promise<any> => {
+  // First ensure Google API is initialized
+  if (!gapi || !gapi.client) {
+    console.error('[GoogleCalendar] Google API not initialized, cannot fetch colors');
+    return null;
+  }
+  
+  // Make sure user is authenticated
+  const isAuthenticated = await ensureAuthenticated();
+  if (!isAuthenticated) {
+    console.log('[GoogleCalendar] User not authenticated, cannot fetch colors');
+    return null;
+  }
+  
+  try {
+    console.log('[GoogleCalendar] Fetching calendar colors');
+    
+    const response = await gapi.client.calendar.colors.get({});
+    
+    console.log('[GoogleCalendar] Colors fetched successfully:', response.result);
+    
+    // Save token after successful API call to extend expiry
+    const token = gapi.client.getToken();
+    if (token) {
+      saveToken(token);
+    }
+    
+    return response.result;
+  } catch (error) {
+    console.error('[GoogleCalendar] Error fetching calendar colors:', error);
+    return null;
+  }
+};
+
+// Google Calendar color mapping
+// These are approximate colors used by Google Calendar
+// Will be used as fallback if we can't fetch actual colors from the API
+const googleCalendarColors = {
+  '1': { background: '#7986CB', foreground: '#FFFFFF' }, // Lavender
+  '2': { background: '#33B679', foreground: '#FFFFFF' }, // Sage
+  '3': { background: '#8E24AA', foreground: '#FFFFFF' }, // Grape
+  '4': { background: '#E67C73', foreground: '#FFFFFF' }, // Flamingo
+  '5': { background: '#F6BF26', foreground: '#000000' }, // Banana
+  '6': { background: '#F4511E', foreground: '#FFFFFF' }, // Tangerine
+  '7': { background: '#039BE5', foreground: '#FFFFFF' }, // Peacock
+  '8': { background: '#616161', foreground: '#FFFFFF' }, // Graphite
+  '9': { background: '#3F51B5', foreground: '#FFFFFF' }, // Blueberry
+  '10': { background: '#0B8043', foreground: '#FFFFFF' }, // Basil
+  '11': { background: '#D50000', foreground: '#FFFFFF' }, // Tomato
+};
+
+// Store fetched colors from the API
+let fetchedCalendarColors: any = null;
 
 /**
  * Create a new event in Google Calendar
@@ -581,7 +728,8 @@ export const createEvent = async (title: string, start: Date, end: Date, isAllDa
 /**
  * Update an existing event in Google Calendar
  */
-export const updateEvent = async (eventId: string, title: string, start: Date, end: Date, isAllDay: boolean = false) => {
+export const updateEvent = async (eventId: string, title: string, 
+  start: Date, end: Date, isAllDay: boolean = false, colorId?: string) => {
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {
     console.error('[GoogleCalendar] Google API not initialized, cannot update event');
@@ -597,11 +745,16 @@ export const updateEvent = async (eventId: string, title: string, start: Date, e
     return null;
   }
   
-  const event = {
+  const event: any = {
     'summary': title,
     'start': isAllDay ? { 'date': start.toISOString().split('T')[0] } : { 'dateTime': start.toISOString() },
     'end': isAllDay ? { 'date': end.toISOString().split('T')[0] } : { 'dateTime': end.toISOString() }
   };
+  
+  // Only add colorId if provided (to maintain the original color)
+  if (colorId) {
+    event.colorId = colorId;
+  }
   
   try {
     console.log('[GoogleCalendar] Updating event:', eventId);

@@ -13,6 +13,6 @@ export type App = {
 export const appAtom = atom<App>({
   view: 'tasks',
   rightSidebarFolded: false,
-  calendarView: 'dayGridMonth',
+  calendarView: 'timeGridWeek',
   sidebarType: 'timebox',
 })

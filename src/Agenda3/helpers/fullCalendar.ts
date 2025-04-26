@@ -22,7 +22,7 @@ export const transformAgendaTaskToCalendarEvent = (
 
   try {
     const { showFirstEventInCycleOnly = false, showTimeLog = false, groupType } = options
-    const { estimatedTime = DEFAULT_ESTIMATED_TIME, timeLogs = [], status, actualTime } = task
+    const { estimatedTime = DEFAULT_ESTIMATED_TIME, timeLogs = [], status, actualTime, googleCalendarId } = task
     const rrule: CalendarEvent['rrule'] =
       showFirstEventInCycleOnly && task.rrule
         ? {
@@ -64,6 +64,11 @@ export const transformAgendaTaskToCalendarEvent = (
         : _task.deadline?.value.add(spanTime, 'minute').toDate() || new Date(Date.now() + spanTime * 60000)
     }
 
+    // Determine if the event is editable
+    // - Non-editable if it's a recurring past task or has rrule or no start date
+    // - Google Calendar events are editable if they have a Google Calendar ID
+    const isEditable = !(task.recurringPast || task.rrule || !task.start) || !!googleCalendarId;
+
     return [
       {
         id: task.id,
@@ -74,7 +79,7 @@ export const transformAgendaTaskToCalendarEvent = (
         extendedProps: task,
         rrule,
         duration: allDay ? undefined : { minute: spanTime },
-        editable: !(task.recurringPast || task.rrule || !task.start),
+        editable: isEditable,
         color: groupType === 'page' ? task.project?.bgColor : task.filters?.[0]?.color,
       },
     ]
@@ -112,22 +117,27 @@ export const secondsToHHmmss = (seconds: number): string => {
   return `${padZero(hour)}:${padZero(minute)}:${padZero(second)}`
 }
 
-export const transformGoogleEventToCalendarEvent = (task: AgendaTaskWithStartOrDeadline): CalendarEvent => {
-  const { id, title, start, end, allDay, project, filters, bgColor } = task;
+export const transformGoogleEventToCalendarEvent = (task: AgendaTaskWithStartOrDeadline & { 
+  bgColor?: string; 
+  borderColor?: string; 
+  color?: string;
+  isGCalEvent?: boolean;
+  extendedProps?: any;
+}): CalendarEvent => {
+  const { id, title, showTitle, start, end, allDay, project, filters } = task;
+  const bgColor = task.bgColor;
+  const borderColor = task.borderColor;
 
   // Assuming start and end are Date objects or can be converted to Date
   return {
     id,
-    title: title || 'Untitled Task',
+    title: showTitle || title || 'Untitled Event',
     allDay: allDay || false,
     start: start ? start.toDate() : new Date(), // Fallback to current date if start is missing
-    end: end ? end.toDate() : new Date(), // Fallback to current date if end is missing
-    extendedProps: {
-      project,
-      filters,
-      // Add any other properties that might be relevant
-    },
-    editable: false, // Assuming the event is editable
-    color: bgColor || filters?.[0]?.color || '#000', // Default color if none is provided
+    end: end ? end.toDate() : (start ? start.add(30, 'minutes').toDate() : new Date()), // Default to 30 min duration
+    extendedProps: task, // Pass the entire task as extendedProps for access in event handlers
+    editable: true, // Make Google Calendar events editable
+    color: bgColor || project?.properties?.['agenda-color'] || '#4285F4', // Use Google Calendar colors
+    textColor: task.color || '#FFFFFF',
   };
 }

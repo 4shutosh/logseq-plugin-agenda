@@ -5,14 +5,19 @@ import { useTranslation } from 'react-i18next'
 import useSettings from '@/Agenda3/hooks/useSettings'
 import { initGoogleApi, isSignedIn, signIn, signOut } from '@/services/googleCalendar'
 import ColorPicker from '@/components/ColorPicker'
+import useGoogleCalendar from '@/Agenda3/hooks/useGoogleCalendar'
+import { useAtom } from 'jotai'
+import { googleCalendarTasks } from '@/Agenda3/models/entities/tasks'
 
 const GoogleCalendarForm = () => {
   const { t } = useTranslation()
   const { settings, setSettings } = useSettings()
   const [googleSignedIn, setGoogleSignedIn] = useState(false)
+  const { syncGoogleEvents } = useGoogleCalendar()
+  const [googleTasks, setGoogleTasks] = useAtom(googleCalendarTasks)
   
   // Check if user is signed in when component mounts
-  useEffect(() => {
+  useEffect(() => { 
     const checkSignIn = async () => {
       const googleSettings = settings.googleCalendar
       if (googleSettings?.enabled && googleSettings?.clientId && googleSettings?.apiKey) {
@@ -21,7 +26,9 @@ const GoogleCalendarForm = () => {
           apiKey: googleSettings.apiKey,
           clientSecret: googleSettings.clientSecret
         })
-        setGoogleSignedIn(isSignedIn())
+        // Make sure to resolve the Promise before setting state
+        const signedIn = await isSignedIn();
+        setGoogleSignedIn(signedIn);
       }
     }
     
@@ -44,6 +51,7 @@ const GoogleCalendarForm = () => {
     const success = await signIn()
     if (success) {
       setGoogleSignedIn(true)
+      syncGoogleEvents()
     }
   }
 
@@ -51,6 +59,7 @@ const GoogleCalendarForm = () => {
   const handleGoogleSignOut = () => {
     signOut()
     setGoogleSignedIn(false)
+    setGoogleTasks([])
   }
   
   const onChangeGoogleEnabled = (checked: boolean) => {

@@ -1,4 +1,4 @@
-import { Button, Calendar, Modal, Popover, Popconfirm, DatePicker, message, Mentions } from 'antd'
+import { Button, Calendar, Modal, Popover, Popconfirm, DatePicker, message, Mentions, Checkbox } from 'antd'
 import type { MentionsRef } from 'antd/es/mentions'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useAtomValue } from 'jotai'
@@ -20,6 +20,7 @@ import { settingsAtom } from '@/Agenda3/models/settings'
 import DurationSelect from '@/components/TaskModal/components/DurationSelect'
 import TimeSelect from '@/components/TaskModal/components/TimeSelect'
 import { SHOW_DATETIME_FORMATTER, SHOW_DATE_FORMATTER } from '@/constants/agenda'
+import { createEvent, deleteEvent, updateEvent } from '@/services/googleCalendar'
 import type { AgendaEntity } from '@/types/entity'
 import type { AgendaTaskWithStartOrDeadline, TimeLog } from '@/types/task'
 import { getOS } from '@/util/util'
@@ -66,6 +67,10 @@ const TaskModal = ({
   const settings = useAtomValue(settingsAtom)
   const { currentGraph } = useAtomValue(logseqAtom)
   const { allPages: pages, refreshPages } = usePages()
+  const [addToGoogleCalendar, setAddToGoogleCalendar] = useState(false)
+  
+  // Check if Google Calendar is enabled
+  const googleCalendarEnabled = settings.googleCalendar?.enabled || false
 
   const groupType = settings.selectedFilters?.length ? 'filter' : 'page'
 
@@ -96,6 +101,7 @@ const TaskModal = ({
     setInternalOpen(false)
     onCancel?.()
   }
+  
   const handleOk = async () => {
     track(`Task Modal: Ok Button`, { type: info.type })
     const task = await action()
@@ -103,11 +109,31 @@ const TaskModal = ({
     onOk?.()
     setInternalOpen(false)
   }
+  
   const handleDelete = async () => {
     if (info.type === 'edit' && info.initialTaskData?.id) {
-      deleteEntity(info.initialTaskData.id)
-      onDelete?.(info.initialTaskData.id)
-      setInternalOpen(false)
+      try {
+        // Check if task has a Google Calendar ID
+        const gcalId = info.initialTaskData?.googleCalendarId;
+        
+        // If the task has a Google Calendar ID and Google Calendar is enabled, delete from Google Calendar
+        if (gcalId && googleCalendarEnabled) {
+          const success = await deleteEvent(gcalId);
+          if (success) {
+            messageApi.success('Event deleted from Google Calendar');
+          } else {
+            messageApi.warning('Could not delete event from Google Calendar');
+          }
+        }
+      } catch (error) {
+        console.error('[GoogleCalendar] Error deleting event:', error);
+        messageApi.error('Error deleting event from Google Calendar');
+      }
+      
+      // Delete from Logseq
+      deleteEntity(info.initialTaskData.id);
+      onDelete?.(info.initialTaskData.id);
+      setInternalOpen(false);
     }
   }
   const handleSwitchRangeMode = (mode: 'range' | 'date') => {

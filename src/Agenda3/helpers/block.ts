@@ -185,12 +185,13 @@ export const deleteBlogTimeLog = async (uuid: string, index: number) => {
  * create task
  */
 export const createTaskBlock = async (taskInfo: CreateAgendaTask) => {
-  const { title, allDay, start, deadline, end, estimatedTime, projectId, bindObjectiveId } = taskInfo
+  const { title, allDay, start, deadline, end, estimatedTime, projectId, bindObjectiveId, googleCalendarId } = taskInfo
 
   const AGENDA_DRAWER = genAgendaDrawerText({
     estimated: estimatedTime,
     end,
     bindObjectiveId,
+    googleCalendarId
   })
   // const
   const content = [
@@ -339,83 +340,100 @@ export function genDurationString(minutes: number): string {
   return durationString
 }
 
-type AgendaDrawer = { estimated?: number; end?: Dayjs; objective?: AgendaEntityObjective; bindObjectiveId?: string }
+type AgendaDrawer = { 
+  estimated?: number; 
+  end?: Dayjs; 
+  objective?: AgendaEntityObjective; 
+  bindObjectiveId?: string;
+  googleCalendarId?: string;
+}
+
 /**
  * parse agenda drawer
  */
 export function parseAgendaDrawer(blockContent: string): AgendaDrawer | null {
-  const regex = AGENDA_DRAWER_REGEX
-  const matches = blockContent.match(regex)
-  const extractedText = matches ? matches[1].trim() : ''
-  /**
-   * estimated: 1h30m
-   * other: aaa
-   */
-  const properties = extractedText
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      return line.split(':').map((v) => v.trim())
-    })
-  return properties.length > 0
-    ? properties.reduce((acc, cur) => {
-        if (cur[0] === 'estimated') return { ...acc, estimated: parseDurationString(cur[1]) }
-        if (cur[0] === 'end') return { ...acc, end: dayjs(cur[1], DATE_FORMATTER) }
-        if (cur[0] === 'objective') {
-          // week-2023-46
-          const [type, year, number] = cur[1].split('-')
-          return {
-            ...acc,
-            objective: {
-              type: type as AgendaEntityObjective['type'],
-              year: Number(year),
-              number: Number(number),
-            },
-          }
-        }
-        if (cur[0] === 'bindObjectiveId') return { ...acc, bindObjectiveId: cur[1] }
-        return { ...acc, [cur[0]]: cur[1] }
-      }, {} as AgendaDrawer)
-    : null
+  // Match with Regex
+  const drawerMatch = blockContent.match(AGENDA_DRAWER_REGEX)
+  if (!drawerMatch || !drawerMatch[1]) return null
+
+  const drawerContent = drawerMatch[1]
+  const result: AgendaDrawer = {}
+  // Parse estimated time
+  const estimatedMatch = drawerContent.match(/estimated:: (\d+)/i)
+  if (estimatedMatch && estimatedMatch[1]) {
+    result.estimated = parseInt(estimatedMatch[1])
+  }
+
+  // Parse end date
+  const endMatch = drawerContent.match(/end:: (.+)/i)
+  if (endMatch && endMatch[1]) {
+    result.end = dayjs(endMatch[1])
+  }
+
+  // Parse objective
+  const objectiveMatch = drawerContent.match(/objective:: (.+)/i)
+  if (objectiveMatch && objectiveMatch[1]) {
+    result.bindObjectiveId = objectiveMatch[1]
+  }
+  
+  // Parse Google Calendar ID
+  const googleCalendarIdMatch = drawerContent.match(/google-calendar-id:: (.+)/i)
+  if (googleCalendarIdMatch && googleCalendarIdMatch[1]) {
+    result.googleCalendarId = googleCalendarIdMatch[1]
+  }
+
+  return result
 }
+
 /**
  * generate agenda drawer text
  */
 export function genAgendaDrawerText(drawer: AgendaDrawer): string {
-  const keys = Object.keys(drawer)
-  if (keys.length <= 0) return ''
-  const content = keys
-    .map((key) => {
-      const originalVal = drawer[key]
-      if (!originalVal) return null
-
-      let valueText = ''
-      if (key === 'estimated') {
-        valueText = genDurationString(originalVal)
-      } else if (key === 'end') {
-        valueText = originalVal.format(DATE_FORMATTER)
-      } else if (key === 'objective') {
-        valueText = `${originalVal.type}-${originalVal.year}-${originalVal.number}`
-      } else if (key === 'bindObjectiveId') {
-        valueText = originalVal
-      }
-      return `${key}: ${valueText}`
-    })
-    .filter(Boolean)
-  if (content.length <= 0) return ''
-  return [':AGENDA:', ...content, ':END:'].join('\n')
+  if (!drawer.estimated && !drawer.end && !drawer.bindObjectiveId && !drawer.googleCalendarId) return ''
+  const lines = [':agenda:']
+  if (drawer.estimated) {
+    lines.push(`estimated:: ${drawer.estimated}`)
+  }
+  if (drawer.end) {
+    lines.push(`end:: ${drawer.end.format(DATE_FORMATTER)}`)
+  }
+  if (drawer.bindObjectiveId) {
+    lines.push(`objective:: ${drawer.bindObjectiveId}`)
+  }
+  if (drawer.googleCalendarId) {
+    lines.push(`google-calendar-id:: ${drawer.googleCalendarId}`)
+  }
+  lines.push(':end:')
+  return lines.join('\n')
 }
 
 /**
  * update agenda drawer
  */
 export function updateBlockAgendaDrawer(blockContent: string, drawer: AgendaDrawer) {
-  // const _drawer = drawer
-  // if (!drawer.estimated || drawer.estimated === DEFAULT_ESTIMATED_TIME) delete _drawer.estimated
-  const newText = genAgendaDrawerText(drawer)
-  if (!AGENDA_DRAWER_REGEX.test(blockContent) && newText) return blockContent + '\n' + newText
-  return blockContent.replace(AGENDA_DRAWER_REGEX, '\n' + newText)
+  // If the block content doesn't have an agenda drawer and we don't want to add one, just return the content
+  if (!AGENDA_DRAWER_REGEX.test(blockContent) && !drawer.estimated && !drawer.end && !drawer.bindObjectiveId && !drawer.googleCalendarId) {
+    return blockContent
+  }
+
+  // If the block content already has an agenda drawer, update it
+  if (AGENDA_DRAWER_REGEX.test(blockContent)) {
+    return blockContent.replace(AGENDA_DRAWER_REGEX, (_, existingContent) => {
+      // Parse existing content
+      const existingDrawer = parseAgendaDrawer(blockContent) || {}
+      // Merge old and new
+      const mergedDrawer = {
+        ...existingDrawer,
+        ...drawer,
+      }
+      return genAgendaDrawerText(mergedDrawer)
+    })
+  }
+
+  // If the block doesn't have an agenda drawer, add one
+  return `${blockContent}\n${genAgendaDrawerText(drawer)}`
 }
+
 /**
  * updateScheduled
  */
@@ -437,6 +455,7 @@ export function updateBlockScheduled(blockContent: string, { start, allDay }: { 
     .filter(Boolean)
     .join('\n')
 }
+
 /**
  * update deadline
  */
@@ -458,6 +477,7 @@ export function updateBlockDeadline(blockContent: string, deadline?: AgendaEntit
     .filter(Boolean)
     .join('\n')
 }
+
 /**
  * update title
  */
@@ -471,6 +491,7 @@ export function updateBlockTaskTitle(blockContent: string, title: string, status
     })
     .join('\n')
 }
+
 /**
  * update time log
  */
@@ -540,6 +561,7 @@ export const createObjectiveBlock = async (objective: CreateObjectiveForm) => {
   if (!block) return Promise.reject(new Error('Failed to create objective block'))
   return logseq.Editor.getBlock(block.uuid)
 }
+
 /**
  * update objective block
  */
