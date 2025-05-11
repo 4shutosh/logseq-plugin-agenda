@@ -14,7 +14,6 @@ const SCOPES = [
 
 // Token storage keys
 const TOKEN_STORAGE_KEY = 'logseq_agenda_google_token';
-const TOKEN_EXPIRY_KEY = 'logseq_agenda_google_token_expiry';
 
 interface GoogleCalendarSettings {
   clientId: string;
@@ -37,7 +36,7 @@ let isInitializing = false;
 let initPromise: Promise<boolean> | null = null;
 
 /**
- * Save token to localStorage with expiration time
+ * Save token to localStorage
  */
 const saveToken = (token: any) => {
   if (!token) return;
@@ -46,11 +45,7 @@ const saveToken = (token: any) => {
     // Save the token itself
     localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(token));
     
-    // Calculate and save expiration time - Set to 30 days
-    const expiryTime = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
-    localStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString());
-    
-    console.log('[GoogleCalendar] Token saved to localStorage, expires:', new Date(expiryTime).toLocaleString());
+    console.log('[GoogleCalendar] Token saved to localStorage');
   } catch (e) {
     console.error('[GoogleCalendar] Failed to save token to localStorage:', e);
   }
@@ -62,19 +57,8 @@ const saveToken = (token: any) => {
 export const loadToken = () => {
   try {
     const tokenStr = localStorage.getItem(TOKEN_STORAGE_KEY);
-    const expiryStr = localStorage.getItem(TOKEN_EXPIRY_KEY);
     
-    if (!tokenStr || !expiryStr) return null;
-    
-    const expiry = parseInt(expiryStr);
-    const now = Date.now();
-    
-    // Check if token is expired
-    if (now >= expiry) {
-      console.log('[GoogleCalendar] Saved token is expired');
-      clearToken();
-      return null;
-    }
+    if (!tokenStr) return null;
     
     return JSON.parse(tokenStr);
   } catch (e) {
@@ -89,7 +73,6 @@ export const loadToken = () => {
 const clearToken = () => {
   try {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
-    localStorage.removeItem(TOKEN_EXPIRY_KEY);
     console.log('[GoogleCalendar] Token cleared from localStorage');
   } catch (e) {
     console.error('[GoogleCalendar] Failed to clear token from localStorage:', e);
@@ -120,9 +103,6 @@ export const verifyToken = async (): Promise<boolean> => {
     
     if (response && response.status === 200) {
       console.log('[GoogleCalendar] Token verification successful');
-      
-      // Update saved token expiry time since we verified it's valid
-      saveToken(token);
       
       return true;
     }
@@ -459,7 +439,7 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
   // Make sure user is authenticated
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
-    console.log('[GoogleCalendar] User not authenticated, cannot get events');
+    console.log('[GoogleCalendar] User not authenticated, cannot get events');f
     message.error('Please sign in to Google Calendar first');
     return [];
   }
@@ -493,12 +473,6 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
       response.result.items?.length || 0, 'events');
 
     console.log('events', response)
-    
-    // Save token after successful API call to extend expiry
-    const token = gapi.client.getToken();
-    if (token) {
-      saveToken(token);
-    }
     
     return response.result.items || [];
   } catch (error: any) {
@@ -645,12 +619,6 @@ export const fetchGoogleCalendarColors = async (): Promise<any> => {
     
     console.log('[GoogleCalendar] Colors fetched successfully:', response.result);
     
-    // Save token after successful API call to extend expiry
-    const token = gapi.client.getToken();
-    if (token) {
-      saveToken(token);
-    }
-    
     return response.result;
   } catch (error) {
     console.error('[GoogleCalendar] Error fetching calendar colors:', error);
@@ -685,7 +653,7 @@ export const createEvent = async (title: string, start: Date, end: Date, isAllDa
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {
     console.error('[GoogleCalendar] Google API not initialized, cannot create event');
-    message.error('Google API not initialized');
+    // message.error('Google API not initialized');
     return null;
   }
   
@@ -693,7 +661,7 @@ export const createEvent = async (title: string, start: Date, end: Date, isAllDa
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
     console.log('[GoogleCalendar] User not authenticated, cannot create event');
-    message.error('Please sign in to Google Calendar first');
+    // message.error('Please sign in to Google Calendar first');
     return null;
   }
   
@@ -713,12 +681,6 @@ export const createEvent = async (title: string, start: Date, end: Date, isAllDa
     
     console.log('[GoogleCalendar] Event created successfully');
     
-    // Save token after successful API call to extend expiry
-    const token = gapi.client.getToken();
-    if (token) {
-      saveToken(token);
-    }
-    
     message.success('Event created in Google Calendar');
     return response.result;
   } catch (error) {
@@ -736,7 +698,7 @@ export const updateGoogleEvent = async (eventId: string, title: string,
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {
     console.error('[GoogleCalendar] Google API not initialized, cannot update event');
-    message.error('Google API not initialized');
+    // message.error('Google API not initialized');
     return null;
   }
   
@@ -744,7 +706,7 @@ export const updateGoogleEvent = async (eventId: string, title: string,
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
     console.log('[GoogleCalendar] User not authenticated, cannot update event');
-    message.error('Please sign in to Google Calendar first');
+    // message.error('Please sign in to Google Calendar first');
     return null;
   }
   
@@ -770,12 +732,6 @@ export const updateGoogleEvent = async (eventId: string, title: string,
     
     console.log('[GoogleCalendar] Event updated successfully');
     
-    // Save token after successful API call to extend expiry
-    const token = gapi.client.getToken();
-    if (token) {
-      saveToken(token);
-    }
-    
     message.success('Event updated in Google Calendar');
     return response.result;
   } catch (error) {
@@ -792,7 +748,7 @@ export const deleteEvent = async (eventId: string) => {
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {
     console.error('[GoogleCalendar] Google API not initialized, cannot delete event');
-    message.error('Google API not initialized');
+    // message.error('Google API not initialized');
     return false;
   }
   
@@ -800,7 +756,7 @@ export const deleteEvent = async (eventId: string) => {
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
     console.log('[GoogleCalendar] User not authenticated, cannot delete event');
-    message.error('Please sign in to Google Calendar first');
+    // message.error('Please sign in to Google Calendar first');
     return false;
   }
   
@@ -813,12 +769,6 @@ export const deleteEvent = async (eventId: string) => {
     });
     
     console.log('[GoogleCalendar] Event deleted successfully');
-    
-    // Save token after successful API call to extend expiry
-    const token = gapi.client.getToken();
-    if (token) {
-      saveToken(token);
-    }
     
     message.success('Event deleted from Google Calendar');
     return true;
