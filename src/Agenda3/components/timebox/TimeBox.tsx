@@ -31,6 +31,22 @@ import { type CreateTaskForm } from '../modals/TaskModal/useCreate'
 import TheCalendarEvent from './TheCalendarEvent'
 import s from './timebox.module.less'
 
+// Extended type for Google Calendar events
+type GoogleCalendarEvent = AgendaTaskWithStartOrDeadline & {
+  isGCalEvent?: boolean;
+  description?: string;
+  location?: string;
+  googleCalendarId?: string;
+  showTitle?: string;
+  colorId?: string;
+  properties?: {
+    htmlLink?: string;
+    [key: string]: any;
+  };
+};
+
+type ExtendedAgendaTask = GoogleCalendarEvent;
+
 type FullCalendarEventInfo = {
   event: EventApi
   oldEvent: CalendarEvent
@@ -94,7 +110,7 @@ const TimeBox = ({ onChangeType }: { onChangeType?: () => void }) => {
 
   const [editTaskModal, setEditTaskModal] = useState<{
     open: boolean
-    task?: AgendaTaskWithStartOrDeadline
+    task?: ExtendedAgendaTask
     isGoogleEvent?: boolean
   }>({
     open: false,
@@ -105,8 +121,16 @@ const TimeBox = ({ onChangeType }: { onChangeType?: () => void }) => {
 
   const onEventClick = (info: unknown) => {
     const _info = info as FullCalendarEventInfo
-    const eventData = _info.event.extendedProps
-    const isGoogleEvent = _info.event.id.startsWith('gcal_')
+    const eventData = _info.event.extendedProps as ExtendedAgendaTask
+    
+    // Determine if this is a Google Calendar event
+    // 1. Check if the event ID starts with 'gcal_'
+    // 2. Check if the event has isGCalEvent property
+    // 3. Check if the event has googleCalendarId property
+    const isGoogleEvent = 
+      _info.event.id.startsWith('gcal_') || 
+      eventData?.isGCalEvent || 
+      !!eventData?.googleCalendarId;
     
     setEditTaskModal({
       open: true,
@@ -121,12 +145,15 @@ const TimeBox = ({ onChangeType }: { onChangeType?: () => void }) => {
     const calendarApi = calendarRef.current?.getApi()
     const _info = info as EventDropArg | EventResizeDoneArg
     const { start, end, id: blockUUID, extendedProps } = _info.event
-    const task = extendedProps || {};
+    const task = (extendedProps || {}) as ExtendedAgendaTask;
     const startDay = dayjs(start)
     const span = dayjs(end).diff(start, 'minute')
     
     // Check if this is a Google Calendar event
-    const isGoogleEvent = blockUUID.startsWith('gcal_') || task?.googleCalendarId;
+    const isGoogleEvent = 
+      blockUUID.startsWith('gcal_') || 
+      task?.isGCalEvent || 
+      !!task?.googleCalendarId;
     
     if (isGoogleEvent) {
       // Handle Google Calendar event update
@@ -149,10 +176,7 @@ const TimeBox = ({ onChangeType }: { onChangeType?: () => void }) => {
         const isAllDay = task?.allDay || false;
         
         // Extract the colorId from the original event to preserve the color
-        let colorId;
-        // The original Google Calendar event's colorId should be stored on the task object itself (extendedProps)
-        // during the conversion process. Access it directly.
-        colorId = task?.colorId;
+        let colorId = task?.colorId;
         
         console.log('[GoogleCalendar] Using colorId for update:', colorId);
         
@@ -425,11 +449,12 @@ const TimeBox = ({ onChangeType }: { onChangeType?: () => void }) => {
         )
       ) : null}
       
+      {/* Render only one modal at a time, prioritizing Google Calendar event modal if isGoogleEvent is true */}
       {editTaskModal.open && (
         editTaskModal.isGoogleEvent ? (
           <TaskModal.Edit
             open={editTaskModal.open}
-            googleEvent={editTaskModal.task}
+            googleEvent={editTaskModal.task as GoogleCalendarEvent}
             onClose={() => setEditTaskModal({ open: false })}
             onGoogleEventDelete={handleGoogleEventDelete}
           />

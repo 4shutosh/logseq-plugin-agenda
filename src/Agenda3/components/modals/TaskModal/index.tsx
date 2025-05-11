@@ -32,6 +32,19 @@ import TimeLogComponent from './TimeLog'
 import useCreate, { type CreateTaskForm } from './useCreate'
 import useEdit from './useEdit'
 
+// Extended type for Google Calendar events
+type GoogleCalendarEvent = AgendaTaskWithStartOrDeadline & {
+  isGCalEvent?: boolean;
+  description?: string;
+  location?: string;
+  googleCalendarId?: string;
+  showTitle?: string;
+  properties?: {
+    htmlLink?: string;
+    [key: string]: any;
+  };
+};
+
 const TaskModal = ({
   open,
   info,
@@ -579,11 +592,11 @@ TaskModal.Edit = ({
   onGoogleEventDelete
 }: {
   open: boolean
-  task?: any
-  googleEvent?: any
+  task?: AgendaTaskWithStartOrDeadline
+  googleEvent?: GoogleCalendarEvent
   onClose: () => void
   onGoogleEventUpdate?: (title: string, start: Date, end: Date, isAllDay: boolean) => void
-  onGoogleEventDelete?: (eventId: string) => void
+  onGoogleEventDelete?: (eventId: string) => Promise<void> | void
 }) => {
   const { t } = useTranslation()
   
@@ -591,47 +604,34 @@ TaskModal.Edit = ({
   if (googleEvent) {
     return (
       <Modal
-        title={t('Edit Google Calendar Event')}
+        title={t('Google Calendar Event')}
         open={open}
         onCancel={onClose}
         footer={[
           <Button key="close" onClick={onClose}>
             {t('Close')}
           </Button>,
-          <Button 
-            key="delete" 
-            danger 
-            onClick={() => {
-              if (onGoogleEventDelete && googleEvent?.id) {
-                onGoogleEventDelete(googleEvent.id)
-              }
-            }}
-          >
-            {t('Delete')}
-          </Button>,
-          <Button 
-            key="update" 
-            type="primary"
-            onClick={() => {
-              if (onGoogleEventUpdate && googleEvent) {
-                const startDate = googleEvent.originalStart || googleEvent.start;
-                const endDate = googleEvent.originalEnd || googleEvent.end;
-                
-                onGoogleEventUpdate(
-                  googleEvent.title || 'No title',
-                  startDate ? new Date(startDate) : new Date(),
-                  endDate ? new Date(endDate) : new Date(),
-                  !!googleEvent.isAllDay
-                )
-              }
-            }}
-          >
-            {t('Update')}
-          </Button>
+          googleEvent && onGoogleEventDelete ? (
+             <Popconfirm
+                key="delete"
+                title="Delete from Google Calendar?"
+                description="This will permanently delete the event from your Google Calendar."
+                onConfirm={() => googleEvent.id && onGoogleEventDelete(googleEvent.id)}
+                okText="Yes, Delete"
+                cancelText="Cancel"
+              >
+              <Button
+                key="delete"
+                danger
+              >
+                {t('Delete')}
+              </Button>
+            </Popconfirm>
+          ) : null,
         ]}
       >
         <div className="mb-4">
-          <h3 className="text-xl font-semibold">{googleEvent.title}</h3>
+          <h3 className="text-lg font-semibold">{googleEvent.title || googleEvent.showTitle || t('Untitled Event')}</h3>
           {googleEvent.description && (
             <div className="mt-2 text-gray-600">
               <p>{googleEvent.description}</p>
@@ -642,16 +642,29 @@ TaskModal.Edit = ({
               <p>Location: {googleEvent.location}</p>
             </div>
           )}
+          {googleEvent.start && (
+             <div className="mt-2 text-sm text-gray-500">
+                {googleEvent.start.format(googleEvent.allDay ? SHOW_DATE_FORMATTER : SHOW_DATETIME_FORMATTER)}
+                {googleEvent.end && ` - ${googleEvent.end.format(googleEvent.allDay ? SHOW_DATE_FORMATTER : SHOW_DATETIME_FORMATTER)}`}
+             </div>
+          )}
         </div>
         <div className="text-sm text-gray-500">
-          {t('This event is from Google Calendar. For advanced editing, please open it in Google Calendar.')}
+          {t('This event is from Google Calendar. For editing, please open it in Google Calendar.')}
         </div>
+        {googleEvent.properties?.htmlLink && (
+           <div className="mt-2">
+             <a href={googleEvent.properties.htmlLink} target="_blank" rel="noopener noreferrer">
+                <Button size="small">{t('Open in Google Calendar')}</Button>
+             </a>
+           </div>
+        )}
       </Modal>
     )
   }
   
   // Handle regular task events
-  return (
+  return task ? (
     <TaskModal
       open={open}
       info={{
@@ -660,7 +673,7 @@ TaskModal.Edit = ({
       }}
       onCancel={onClose}
     />
-  )
+  ) : null
 }
 
 TaskModal.Create = ({
