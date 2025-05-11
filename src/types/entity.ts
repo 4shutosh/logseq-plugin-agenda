@@ -35,6 +35,8 @@ export type AgendaEntity = {
   objective?: AgendaEntityObjective
   /** which Objective Entity bind of */
   bindObjectiveId?: string // from agenda drawer objectiveId
+  /** Google Calendar event ID for synced tasks */
+  googleCalendarId?: string // from agenda drawer google-calendar-id
   rawBlock: BlockFromQuery // raw block entity
 }
 

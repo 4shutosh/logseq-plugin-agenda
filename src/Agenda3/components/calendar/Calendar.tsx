@@ -6,21 +6,23 @@ import rrulePlugin from '@fullcalendar/rrule'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import clsx from 'clsx'
 import dayjs from 'dayjs'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { useTheme } from '@/Agenda3/components/ThemeProvider'
 import { genDurationString } from '@/Agenda3/helpers/block'
-import { transformAgendaTaskToCalendarEvent } from '@/Agenda3/helpers/fullCalendar'
+import { transformAgendaTaskToCalendarEvent, transformGoogleEventToCalendarEvent } from '@/Agenda3/helpers/fullCalendar'
 import { navToLogseqBlock } from '@/Agenda3/helpers/logseq'
 import { track } from '@/Agenda3/helpers/umami'
 import useAgendaEntities from '@/Agenda3/hooks/useAgendaEntities'
 import { appAtom } from '@/Agenda3/models/app'
-import { tasksWithStartOrDeadlineAtom } from '@/Agenda3/models/entities/tasks'
+import { googleCalendarTasks, tasksWithStartOrDeadlineAtom } from '@/Agenda3/models/entities/tasks'
 import { logseqAtom } from '@/Agenda3/models/logseq'
 import { settingsAtom } from '@/Agenda3/models/settings'
-// import useTheme from '@/hooks/useTheme'
-import type { AgendaTaskWithStart } from '@/types/task'
+import { updateGoogleEvent, createEvent, deleteEvent } from '@/services/googleCalendar'
+import useGoogleCalendar from '@/Agenda3/hooks/useGoogleCalendar'
+import type { AgendaTaskWithStart, AgendaTaskWithStartOrDeadline } from '@/types/task'
 import { cn } from '@/util/util'
 
 import TaskModal from '../modals/TaskModal'
@@ -30,6 +32,20 @@ import TheCalendarEvent from './TheCalendarEvent'
 import WeekNumber from './WeekNumber'
 import s from './calendar.module.less'
 
+// Extended type for Google Calendar events
+type GoogleCalendarEvent = AgendaTaskWithStartOrDeadline & {
+  isGCalEvent?: boolean;
+  description?: string;
+  location?: string;
+  googleCalendarId?: string;
+  showTitle?: string;
+  colorId?: string;
+  properties?: {
+    htmlLink?: string;
+    [key: string]: any;
+  };
+};
+
 const FULL_CALENDAR_24HOUR_FORMAT = {
   hour: '2-digit',
   minute: '2-digit',
@@ -37,12 +53,14 @@ const FULL_CALENDAR_24HOUR_FORMAT = {
 } as const
 type CalendarProps = { onCalendarTitleChange: (title: string) => void }
 const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
-  // const [currentView, setCurrentView] = useState<CalendarView>('dayGridMonth')
+  const { t } = useTranslation()
   const calendarRef = useRef<FullCalendar>(null)
   const { currentTheme: theme } = useTheme()
+  const [googleEvents, setGoogleEvents] = useAtom(googleCalendarTasks)
+  const { syncGoogleEvents } = useGoogleCalendar()
   const app = useAtomValue(appAtom)
   const { updateEntity } = useAgendaEntities()
-  const tasksWithStartOrDeadline = useAtomValue(tasksWithStartOrDeadlineAtom)
+  const [tasksWithStartOrDeadline] = useAtom(tasksWithStartOrDeadlineAtom)
   const settings = useAtomValue(settingsAtom)
   const { currentGraph } = useAtomValue(logseqAtom)
   const startingDay = settings.general?.startOfWeek
@@ -50,8 +68,12 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
   const showTasks = tasksWithStartOrDeadline?.filter((task) =>
     settings.viewOptions?.hideCompleted ? task.status === 'todo' : true,
   )
+
+  const googleEventsMapped = googleEvents?.
+    map((task) => transformGoogleEventToCalendarEvent(task), {}).flat()
+  
   // const now = dayjs()
-  const calendarEvents = showTasks
+  const showEventsMapped = [...showTasks]
     ?.map((task) =>
       transformAgendaTaskToCalendarEvent(task, {
         showFirstEventInCycleOnly: settings.viewOptions?.showFirstEventInCycleOnly,
@@ -61,9 +83,15 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
     )
     .flat()
 
+  const calendarEvents = [...showEventsMapped,...googleEventsMapped]
+  .sort(
+    (a, b) => a.start.getTime() - b.start.getTime()
+  );
+
   const [editTaskModal, setEditTaskModal] = useState<{
     open: boolean
-    task?: AgendaTaskWithStart
+    task?: AgendaTaskWithStartOrDeadline
+    isGoogleEvent?: boolean
   }>({
     open: false,
   })
@@ -78,17 +106,31 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
   })
 
   const onEventClick = (info: EventClickArg) => {
+    const eventData = info.event.extendedProps as GoogleCalendarEvent;
+    
+    // Determine if this is a Google Calendar event
+    // 1. Check if the event ID starts with 'gcal_'
+    // 2. Check if the event has isGCalEvent property
+    // 3. Check if the event has googleCalendarId property
+    const isGoogleEvent = 
+      info.event.id.startsWith('gcal_') || 
+      eventData?.isGCalEvent || 
+      !!eventData?.googleCalendarId;
+    
     setEditTaskModal({
       open: true,
-      task: info.event.extendedProps as AgendaTaskWithStart,
+      task: eventData,
+      isGoogleEvent
     })
   }
+  
   const onEventCtrlClick = (info: EventClickArg) => {
     navToLogseqBlock(info.event.extendedProps as AgendaTaskWithStart, currentGraph)
   }
   const onEventScheduleUpdate = (info: EventResizeDoneArg | EventReceiveArg | EventDropArg) => {
     // const calendarApi = calendarRef.current?.getApi()
     const { start, end, id: blockUUID, allDay, extendedProps } = info.event
+    const { isGCalEvent } = extendedProps
     const startDay = dayjs(start)
     // const estimatedTime = dayjs(end).diff(start, 'minute')
     const endDay = dayjs(end).subtract(1, 'day')
@@ -100,17 +142,81 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
       allDay,
     }
     try {
-      updateEntity({ type: 'task-date', id: blockUUID, data: dateInfo })
-      // const event = calendarApi?.getEventById(blockUUID)
-      // if (event) {
-      //   event.setProp('extendedProps', {
-      //     ...event.extendedProps,
-      //     ...dateInfo,
-      //   })
-      // }
+      if (isGCalEvent && extendedProps) {
+        // Cast extendedProps to the correct type to access task properties
+        const task = extendedProps as GoogleCalendarEvent;
+        // Handle Google Calendar event update
+        try {
+          // Determine the Google Calendar event ID
+          let googleEventId;
+          
+          if (task.googleCalendarId) {
+            // Use the googleCalendarId property from the task
+            googleEventId = task.googleCalendarId;
+          } else if (blockUUID.startsWith('gcal_')) {
+            // Extract from blockUUID for backward compatibility
+            googleEventId = blockUUID.replace('gcal_', '');
+          } else {
+            console.error('[GoogleCalendar] Cannot determine Google Calendar event ID');
+            info.revert();
+            return;
+          }
 
-      // refreshAllTasks()
-      // 其他天移动到今天的 timebox，需要对应移动 kanban
+          let colorId = task.colorId;
+          
+          const isAllDay = task.allDay || false;
+          
+          // Ensure start and end are Date objects for updateGoogleEvent
+          const startDate = start ? dayjs(start).toDate() : new Date();
+          const endDate = end ? dayjs(end).toDate() : dayjs(startDate).add(30, 'minutes').toDate();
+          
+          // Update event in Google Calendar
+          updateGoogleEvent(googleEventId, task.title || 'Untitled Event', 
+            startDate, endDate, isAllDay, colorId)
+            .then(() => {
+              console.log('[GoogleCalendar] Event updated successfully in Google Calendar API. Updating local state.');
+
+              // Update the local Jotai state
+              setGoogleEvents(prevEvents => 
+                prevEvents.map(event => {
+                  // Identify the correct event (need a reliable ID comparison)
+                  // Assuming googleEventId is derived correctly and matches the event.id used in the atom
+                  let eventIdToCheck = googleEventId; // Use the ID used for the API call
+                  // If blockUUID was used and starts with gcal_, use that for matching atom state
+                  if (blockUUID.startsWith('gcal_')) {
+                    eventIdToCheck = blockUUID;
+                  }
+
+                  if (event.id === eventIdToCheck) {
+                    return {
+                      ...event,
+                      start: dayjs(startDate), // Convert back to Dayjs for atom state
+                      end: dayjs(endDate),
+                      allDay: isAllDay,
+                    };
+                  }
+                  return event;
+                })
+              );
+
+              // Also update the event directly in FullCalendar's state for immediate visual feedback
+              info.event.setStart(startDate);
+              info.event.setEnd(endDate);
+              info.event.setAllDay(isAllDay);
+              console.log('[GoogleCalendar] Local state and FullCalendar event updated.');
+            })
+            .catch((error) => {
+              console.error('[GoogleCalendar] Error updating event:', error);
+              info.revert();
+            });
+        } catch (error) {
+          console.error('[GoogleCalendar] Error updating event:', error);
+          info.revert();
+        }
+        return;
+      } else {
+        updateEntity({ type: 'task-date', id: blockUUID, data: dateInfo })
+      }
     } catch (error) {
       logseq.UI.showMsg('resize failed')
       info.revert()
@@ -201,9 +307,9 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
         events={[
           ...calendarEvents,
           // {
-          //   title: 'test background',
-          //   start: '2023-09-22T10:30:00+08:00',
-          //   end: '2023-09-22T12:00:00+08:00',
+          //   title: 'test',
+          //   start: '2025-04-14T18:30:00.000Z',
+          //   end: '2025-04-14T18:30:00.000Z',
           //   display: 'background',
           // },
         ]}
@@ -272,7 +378,7 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
                   <span
                     className={cn(
                       'flex h-6 w-6 items-center justify-center',
-                      date.isToday ? 'rounded bg-blue-400 text-white' : '',
+                      date.isToday ? 'rounded bg-teal-400 text-white' : '',
                     )}
                   >
                     {day.format('DD')}
@@ -283,32 +389,87 @@ const Calendar = ({ onCalendarTitleChange }: CalendarProps, ref) => {
           },
         }}
       />
-      {editTaskModal.task ? (
-        <TaskModal
-          key={editTaskModal.task.id}
-          open={editTaskModal.open}
-          onCancel={() => setEditTaskModal({ open: false })}
-          info={{
-            type: 'edit',
-            initialTaskData: editTaskModal.task,
-          }}
-          onOk={() => {
-            setEditTaskModal({ open: false })
-          }}
-          onDelete={() => {
-            setEditTaskModal({ open: false })
-          }}
-        />
-      ) : null}
+      {editTaskModal.open && (
+        editTaskModal.isGoogleEvent ? (
+          <TaskModal.Edit
+            open={editTaskModal.open}
+            googleEvent={editTaskModal.task as GoogleCalendarEvent}
+            onClose={() => setEditTaskModal({ open: false })}
+            onGoogleEventDelete={async (eventId) => {
+              try {
+                const success = await deleteEvent(eventId);
+                if (success) {
+                  logseq.UI.showMsg('Event deleted from Google Calendar', 'success');
+                  // Close modal
+                  setEditTaskModal({ open: false });
+                  
+                  // Refresh Google Calendar events
+                  if (syncGoogleEvents) {
+                    syncGoogleEvents();
+                  }
+                } else {
+                  logseq.UI.showMsg('Failed to delete event from Google Calendar', 'error');
+                }
+              } catch (error) {
+                console.error('[GoogleCalendar] Error deleting event:', error);
+                logseq.UI.showMsg('Error deleting event from Google Calendar', 'error');
+              }
+            }}
+          />
+        ) : (
+          <TaskModal
+            key={editTaskModal.task?.id}
+            open={editTaskModal.open}
+            onCancel={() => setEditTaskModal({ open: false })}
+            info={{
+              type: 'edit',
+              initialTaskData: editTaskModal.task as AgendaTaskWithStart,
+            }}
+            onOk={() => {
+              setEditTaskModal({ open: false })
+            }}
+            onDelete={() => {
+              setEditTaskModal({ open: false })
+            }}
+          />
+        )
+      )}
       {createTaskModal.open ? (
-        <TaskModal
-          open={createTaskModal.open}
-          onOk={() => {
-            setCreateTaskModal({ open: false })
-          }}
-          onCancel={() => setCreateTaskModal({ open: false })}
-          info={{ type: 'create', initialData: createTaskModal.initialData }}
-        />
+        settings.googleCalendar?.enabled ? (
+          <TaskModal.Create
+            open={createTaskModal.open}
+            initialData={createTaskModal.initialData}
+            onClose={() => setCreateTaskModal({ open: false })}
+            googleCalendarEnabled={settings.googleCalendar?.enabled}
+            onCreateGoogleEvent={async (title, start, end, isAllDay) => {
+              try {
+                const result = await createEvent(title, start, end, isAllDay);
+                if (result) {
+                  logseq.UI.showMsg('Event created in Google Calendar', 'success');
+                  
+                  // Refresh Google Calendar events
+                  if (syncGoogleEvents) {
+                    syncGoogleEvents();
+                  }
+                } else {
+                  logseq.UI.showMsg('Failed to create event in Google Calendar', 'error');
+                }
+              } catch (error) {
+                console.error('[GoogleCalendar] Error creating event:', error);
+                logseq.UI.showMsg('Error creating event in Google Calendar', 'error');
+              }
+            }}
+          />
+        ) : (
+          <TaskModal
+            open={createTaskModal.open}
+            onOk={() => {
+              setCreateTaskModal({ open: false })
+            }}
+            onCancel={() => setCreateTaskModal({ open: false })}
+            info={{ type: 'create', initialData: createTaskModal.initialData }}
+          />
+        )
       ) : null}
     </div>
   )

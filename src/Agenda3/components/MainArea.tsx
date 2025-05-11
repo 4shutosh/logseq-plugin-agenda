@@ -19,6 +19,9 @@ import CalendarOperation, { CALENDAR_VIEWS, type CalendarView } from './calendar
 import KanBan, { type KanBanHandle } from './kanban/KanBan'
 import SettingsModal from './modals/SettingsModal'
 import TaskModal from './modals/TaskModal'
+import { googleCalendarTasks } from '../models/entities/tasks'
+import useGoogleCalendar from '../hooks/useGoogleCalendar'
+
 
 const MultipleView = ({ className }: { className?: string }) => {
   const { t } = useTranslation()
@@ -27,6 +30,9 @@ const MultipleView = ({ className }: { className?: string }) => {
   const [app, setApp] = useAtom(appAtom)
   const settings = useAtomValue(settingsAtom)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
+
+  const { googleEvents, syncGoogleEvents, isLoading: isSyncingGoogleEvents } = useGoogleCalendar()
+
 
   const [calendarTitle, setCalendarTitle] = useState('')
 

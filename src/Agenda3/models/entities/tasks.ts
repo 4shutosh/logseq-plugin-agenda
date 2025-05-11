@@ -128,3 +128,5 @@ export const overdueTasksAtom = atom<AgendaTaskWithStart[]>((get) => {
     return task.start.isBefore(today, 'day')
   })
 })
+
+export const googleCalendarTasks = atom<AgendaTaskWithStartOrDeadline[]>([]);
