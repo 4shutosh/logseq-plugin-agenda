@@ -6,6 +6,31 @@ import { AgendaTaskWithStartOrDeadline, AgendaTaskWithStart } from '@/types/task
 import { message } from 'antd';
 import dayjs from 'dayjs';
 
+// Add error message handling utility
+let lastErrorMessage: string | null = null;
+let errorMessageTimeout: NodeJS.Timeout | null = null;
+
+const showErrorMessage = (errorMsg: string) => {
+  // If there's already an error message showing, don't show another one
+  if (lastErrorMessage === errorMsg) {
+    return;
+  }
+
+  // Clear any existing timeout
+  if (errorMessageTimeout) {
+    clearTimeout(errorMessageTimeout);
+  }
+
+  // Show the new error message
+  message.error(errorMsg);
+  lastErrorMessage = errorMsg;
+
+  // Clear the last error message after 3 seconds
+  errorMessageTimeout = setTimeout(() => {
+    lastErrorMessage = null;
+  }, 3000);
+};
+
 // API scopes required for reading and writing calendar events
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
@@ -266,7 +291,7 @@ export const signIn = async (): Promise<boolean> => {
   // Make sure Google API is initialized
   if (!gapi || !tokenClient) {
     console.error('[GoogleCalendar] Google API not initialized, cannot sign in');
-    message.error('Google API not initialized. Please refresh the page and try again.');
+    showErrorMessage('Google API not initialized. Please refresh the page and try again.');
     return false;
   }
   
@@ -276,7 +301,7 @@ export const signIn = async (): Promise<boolean> => {
       if (resp.error) {
         console.error('[GoogleCalendar] Error during sign in:', resp.error);
         clearToken();
-        message.error('Error signing in to Google Calendar');
+        showErrorMessage('Error signing in to Google Calendar');
         resolve(false);
         return;
       }
@@ -335,7 +360,7 @@ export const signIn = async (): Promise<boolean> => {
 export const signOut = (): boolean => {
   if (!gapi) {
     console.error('[GoogleCalendar] Google API not initialized, cannot sign out');
-    message.error('Google API not initialized');
+    showErrorMessage('Google API not initialized');
     return false;
   }
   
@@ -357,7 +382,7 @@ export const signOut = (): boolean => {
       return true;
     } catch (e) {
       console.error('[GoogleCalendar] Error during sign out:', e);
-      message.error('Error signing out from Google Calendar');
+      showErrorMessage('Error signing out from Google Calendar');
       return false;
     }
   } else {
@@ -432,7 +457,7 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {
     console.error('[GoogleCalendar] Google API not initialized, cannot get events');
-    message.error('Google API not initialized');
+    showErrorMessage('Google API not initialized');
     return [];
   }
   
@@ -440,7 +465,7 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
     console.log('[GoogleCalendar] User not authenticated, cannot get events');
-    message.error('Please sign in to Google Calendar first');
+    showErrorMessage('Please sign in to Google Calendar first');
     return [];
   }
   
@@ -487,11 +512,11 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
       gapi.client.setToken(null);
       clearToken();
       
-      message.error('Your Google Calendar session has expired. Please sign in again.');
+      showErrorMessage('Your Google Calendar session has expired. Please sign in again.');
       return [];
     }
     
-    message.error('Failed to fetch events from Google Calendar');
+    showErrorMessage('Failed to fetch events from Google Calendar');
     return [];
   }
 };
@@ -653,7 +678,7 @@ export const createEvent = async (title: string, start: Date, end: Date, isAllDa
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {
     console.error('[GoogleCalendar] Google API not initialized, cannot create event');
-    // message.error('Google API not initialized');
+    showErrorMessage('Google API not initialized');
     return null;
   }
   
@@ -661,7 +686,7 @@ export const createEvent = async (title: string, start: Date, end: Date, isAllDa
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
     console.log('[GoogleCalendar] User not authenticated, cannot create event');
-    // message.error('Please sign in to Google Calendar first');
+    showErrorMessage('Please sign in to Google Calendar first');
     return null;
   }
   
@@ -685,7 +710,7 @@ export const createEvent = async (title: string, start: Date, end: Date, isAllDa
     return response.result;
   } catch (error) {
     console.error('[GoogleCalendar] Error creating event:', error);
-    message.error('Failed to create event in Google Calendar');
+    showErrorMessage('Failed to create event in Google Calendar');
     return null;
   }
 };
@@ -698,7 +723,7 @@ export const updateGoogleEvent = async (eventId: string, title: string,
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {
     console.error('[GoogleCalendar] Google API not initialized, cannot update event');
-    // message.error('Google API not initialized');
+    showErrorMessage('Google API not initialized');
     return null;
   }
   
@@ -706,7 +731,7 @@ export const updateGoogleEvent = async (eventId: string, title: string,
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
     console.log('[GoogleCalendar] User not authenticated, cannot update event');
-    // message.error('Please sign in to Google Calendar first');
+    showErrorMessage('Please sign in to Google Calendar first');
     return null;
   }
   
@@ -736,7 +761,7 @@ export const updateGoogleEvent = async (eventId: string, title: string,
     return response.result;
   } catch (error) {
     console.error('[GoogleCalendar] Error updating event:', error);
-    message.error('Failed to update event in Google Calendar');
+    showErrorMessage('Failed to update event in Google Calendar');
     return null;
   }
 };
@@ -748,7 +773,7 @@ export const deleteEvent = async (eventId: string) => {
   // First ensure Google API is initialized
   if (!gapi || !gapi.client) {
     console.error('[GoogleCalendar] Google API not initialized, cannot delete event');
-    // message.error('Google API not initialized');
+    showErrorMessage('Google API not initialized');
     return false;
   }
   
@@ -756,7 +781,7 @@ export const deleteEvent = async (eventId: string) => {
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
     console.log('[GoogleCalendar] User not authenticated, cannot delete event');
-    // message.error('Please sign in to Google Calendar first');
+    showErrorMessage('Please sign in to Google Calendar first');
     return false;
   }
   
@@ -774,7 +799,7 @@ export const deleteEvent = async (eventId: string) => {
     return true;
   } catch (error) {
     console.error('[GoogleCalendar] Error deleting event:', error);
-    message.error('Failed to delete event from Google Calendar');
+    showErrorMessage('Failed to delete event from Google Calendar');
     return false;
   }
 };
