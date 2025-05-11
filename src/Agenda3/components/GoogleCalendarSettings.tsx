@@ -2,6 +2,16 @@
 
 import React, { useState, useEffect } from 'react';
 
+declare global {
+  interface Window {
+    googleCalendarConfig: {
+      clientId: string;
+      apiKey: string;
+    };
+    initGoogleCalendarAPI: () => void;
+  }
+}
+
 const GoogleCalendarSettings = () => {
   const [clientId, setClientId] = useState('');
   const [apiKey, setApiKey] = useState('');
