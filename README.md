@@ -47,3 +47,11 @@ If you want to contribute, please visit [contribution guide](./CONTRIBUTING.md)
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=haydenull/logseq-plugin-agenda&type=Date)](https://star-history.com/#haydenull/logseq-plugin-agenda&Date)
+
+
+---- 
+
+Customisations: 
+- focus mode
+- better shortcuts
+- save the tasks under a single block inside the journal page
