@@ -13,6 +13,8 @@ import { type App, appAtom } from '@/Agenda3/models/app'
 import { settingsAtom } from '@/Agenda3/models/settings'
 import { cn } from '@/util/util'
 
+import useGoogleCalendar from '../hooks/useGoogleCalendar'
+import { googleCalendarTasks } from '../models/entities/tasks'
 import Filter from './Filter'
 import UploadIcs from './UploadIcs'
 import Calendar, { type CalendarHandle } from './calendar/Calendar'
@@ -20,9 +22,6 @@ import CalendarOperation, { CALENDAR_VIEWS, type CalendarView } from './calendar
 import KanBan, { type KanBanHandle } from './kanban/KanBan'
 import SettingsModal from './modals/SettingsModal'
 import TaskModal from './modals/TaskModal'
-import { googleCalendarTasks } from '../models/entities/tasks'
-import useGoogleCalendar from '../hooks/useGoogleCalendar'
-
 
 const MultipleView = ({ className }: { className?: string }) => {
   const { t } = useTranslation()
@@ -32,8 +31,7 @@ const MultipleView = ({ className }: { className?: string }) => {
   const settings = useAtomValue(settingsAtom)
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
 
-  const { googleEvents, syncGoogleEvents, isLoading: isSyncingGoogleEvents } = useGoogleCalendar()
-
+  const { googleTasks, syncGoogleEvents, isLoading: isSyncingGoogleEvents } = useGoogleCalendar()
 
   const [calendarTitle, setCalendarTitle] = useState('')
 

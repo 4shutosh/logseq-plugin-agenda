@@ -439,7 +439,7 @@ export const getEvents = async (startDate: Date, endDate: Date) => {
   // Make sure user is authenticated
   const isAuthenticated = await ensureAuthenticated();
   if (!isAuthenticated) {
-    console.log('[GoogleCalendar] User not authenticated, cannot get events');f
+    console.log('[GoogleCalendar] User not authenticated, cannot get events');
     message.error('Please sign in to Google Calendar first');
     return [];
   }
