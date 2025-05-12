@@ -7,6 +7,7 @@ import { cn } from '@/util/util'
 import About from './About'
 import FiltersForm from './FiltersForm'
 import GeneralSettingsForm from './GeneralSettingsForm'
+import GoogleCalendarForm from './GoogleCalendarForm'
 import ShareAgendaForm from './ShareAgendaForm'
 import ViewOptionsForm from './ViewOptionsForm'
 import s from './index.module.less'
@@ -19,6 +20,10 @@ const tabs = [
   {
     key: 'viewOptions',
     label: 'View Options',
+  },
+  {
+    key: 'googleCalendar',
+    label: 'Google Calendar',
   },
   {
     key: 'filters',
@@ -55,6 +60,8 @@ const SettingsModal = ({ children, initialTab }: { children?: React.ReactNode; i
         return <ViewOptionsForm />
       case 'general':
         return <GeneralSettingsForm />
+      case 'googleCalendar':
+        return <GoogleCalendarForm />
       case 'filters':
         return <FiltersForm />
       case 'about':

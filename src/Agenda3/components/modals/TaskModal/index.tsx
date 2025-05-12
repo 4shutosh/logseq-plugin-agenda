@@ -1,4 +1,4 @@
-import { Button, Calendar, Modal, Popover, Popconfirm, DatePicker, message, Mentions } from 'antd'
+import { Button, Calendar, Modal, Popover, Popconfirm, DatePicker, message, Mentions, Checkbox } from 'antd'
 import type { MentionsRef } from 'antd/es/mentions'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useAtomValue } from 'jotai'
@@ -20,6 +20,7 @@ import { settingsAtom } from '@/Agenda3/models/settings'
 import DurationSelect from '@/components/TaskModal/components/DurationSelect'
 import TimeSelect from '@/components/TaskModal/components/TimeSelect'
 import { SHOW_DATETIME_FORMATTER, SHOW_DATE_FORMATTER } from '@/constants/agenda'
+import { createEvent, deleteEvent, updateGoogleEvent } from '@/services/googleCalendar'
 import type { AgendaEntity } from '@/types/entity'
 import type { AgendaTaskWithStartOrDeadline, TimeLog } from '@/types/task'
 import { getOS } from '@/util/util'
@@ -30,6 +31,19 @@ import PageIcon from '../../icons/PageIcon'
 import TimeLogComponent from './TimeLog'
 import useCreate, { type CreateTaskForm } from './useCreate'
 import useEdit from './useEdit'
+
+// Extended type for Google Calendar events
+type GoogleCalendarEvent = AgendaTaskWithStartOrDeadline & {
+  isGCalEvent?: boolean;
+  description?: string;
+  location?: string;
+  googleCalendarId?: string;
+  showTitle?: string;
+  properties?: {
+    htmlLink?: string;
+    [key: string]: any;
+  };
+};
 
 const TaskModal = ({
   open,
@@ -66,6 +80,10 @@ const TaskModal = ({
   const settings = useAtomValue(settingsAtom)
   const { currentGraph } = useAtomValue(logseqAtom)
   const { allPages: pages, refreshPages } = usePages()
+  const [addToGoogleCalendar, setAddToGoogleCalendar] = useState(false)
+  
+  // Check if Google Calendar is enabled
+  const googleCalendarEnabled = settings.googleCalendar?.enabled || false
 
   const groupType = settings.selectedFilters?.length ? 'filter' : 'page'
 
@@ -86,7 +104,8 @@ const TaskModal = ({
   const action = info.type === 'edit' ? edit : create
   // can't edit recurring task
   const editDisabled =
-    info.type === 'edit' && (info.initialTaskData.rrule || info.initialTaskData.recurringPast) ? true : false
+    info.type === 'edit' && 
+    (info.initialTaskData?.rrule || info.initialTaskData?.recurringPast) ? true : false
 
   const showStartTimeFormatter = allDay ? SHOW_DATE_FORMATTER : SHOW_DATETIME_FORMATTER
   const showDeadlineTimeFormatter = deadline?.allDay ? SHOW_DATE_FORMATTER : SHOW_DATETIME_FORMATTER
@@ -95,6 +114,7 @@ const TaskModal = ({
     setInternalOpen(false)
     onCancel?.()
   }
+  
   const handleOk = async () => {
     track(`Task Modal: Ok Button`, { type: info.type })
     const task = await action()
@@ -102,11 +122,31 @@ const TaskModal = ({
     onOk?.()
     setInternalOpen(false)
   }
+  
   const handleDelete = async () => {
-    if (info.type === 'edit') {
-      deleteEntity(info.initialTaskData.id)
-      onDelete?.(info.initialTaskData.id)
-      setInternalOpen(false)
+    if (info.type === 'edit' && info.initialTaskData?.id) {
+      try {
+        // Check if task has a Google Calendar ID
+        const gcalId = info.initialTaskData?.googleCalendarId;
+        
+        // If the task has a Google Calendar ID and Google Calendar is enabled, delete from Google Calendar
+        if (gcalId && googleCalendarEnabled) {
+          const success = await deleteEvent(gcalId);
+          if (success) {
+            messageApi.success('Event deleted from Google Calendar');
+          } else {
+            messageApi.warning('Could not delete event from Google Calendar');
+          }
+        }
+      } catch (error) {
+        console.error('[GoogleCalendar] Error deleting event:', error);
+        messageApi.error('Error deleting event from Google Calendar');
+      }
+      
+      // Delete from Logseq
+      deleteEntity(info.initialTaskData.id);
+      onDelete?.(info.initialTaskData.id);
+      setInternalOpen(false);
     }
   }
   const handleSwitchRangeMode = (mode: 'range' | 'date') => {
@@ -148,7 +188,7 @@ const TaskModal = ({
   }
   const onSwitchTaskStatus = async (status: AgendaEntity['status']) => {
     if (editDisabled) return messageApi.error('Please modify the status of the recurring task in logseq.')
-    if (info.type !== 'edit') return
+    if (info.type !== 'edit' || !info.initialTaskData) return
 
     await updateBlockTaskStatus(info.initialTaskData, status)
     updateEntity({
@@ -178,10 +218,10 @@ const TaskModal = ({
         event.stopPropagation()
       } else if (event.code === 'Enter' && mainModifierKey) {
         // toggle TODO status on pressing ctrl+Enter (or cmd+Enter on Mac)
-        if (info.type === 'edit' && info.initialTaskData.status === 'done') {
+        if (info.type === 'edit' && info.initialTaskData?.status === 'done') {
           onSwitchTaskStatus('todo')
         }
-        if (info.type === 'edit' && info.initialTaskData.status === 'todo') {
+        if (info.type === 'edit' && info.initialTaskData?.status === 'todo') {
           onSwitchTaskStatus('done')
           setInternalOpen(false)
         }
@@ -220,7 +260,7 @@ const TaskModal = ({
         footer={
           <div className="flex items-center justify-between">
             <div>
-              {info.type === 'edit' && info.initialTaskData.status === 'todo' ? (
+              {info.type === 'edit' && info.initialTaskData?.status === 'todo' ? (
                 <Button
                   className="inline-flex items-center px-2"
                   icon={<IoIosCheckmarkCircleOutline className="text-base" />}
@@ -230,7 +270,7 @@ const TaskModal = ({
                   {t('Complete')}
                 </Button>
               ) : null}
-              {info.type === 'edit' && info.initialTaskData.status === 'done' ? (
+              {info.type === 'edit' && info.initialTaskData?.status === 'done' ? (
                 <Button
                   className="inline-flex items-center px-2"
                   disabled={editDisabled}
@@ -261,7 +301,9 @@ const TaskModal = ({
                   shape="circle"
                   icon={<LogseqLogo />}
                   onClick={() => {
-                    navToLogseqBlock(info.initialTaskData, currentGraph)
+                    if (info.initialTaskData) {
+                      navToLogseqBlock(info.initialTaskData, currentGraph)
+                    }
                     onCancel?.()
                     setInternalOpen(false)
                   }}
@@ -464,7 +506,7 @@ const TaskModal = ({
                 {formData.deadlineDateVal && deadline ? (
                   <div className="flex items-center gap-1">
                     <span>{deadline.value.format(showDeadlineTimeFormatter)}</span>
-                    {info.type === 'create' || (info.type === 'edit' && info.initialTaskData.status !== 'done') ? (
+                    {info.type === 'create' || (info.type === 'edit' && info.initialTaskData?.status !== 'done') ? (
                       <div className="flex items-center rounded bg-zinc-500/10 px-1 text-xs font-normal text-zinc-400 dark:bg-white/20">
                         <CgSandClock className="text-xs" />
                         <span className="italic">{getDaysBetween(dayjs(), deadline.value)}</span>
@@ -539,3 +581,211 @@ const TaskModal = ({
 }
 
 export default TaskModal
+
+// Create the Edit and Create components as properties of TaskModal
+TaskModal.Edit = ({
+  open,
+  task,
+  googleEvent,
+  onClose,
+  onGoogleEventUpdate,
+  onGoogleEventDelete
+}: {
+  open: boolean
+  task?: AgendaTaskWithStartOrDeadline
+  googleEvent?: GoogleCalendarEvent
+  onClose: () => void
+  onGoogleEventUpdate?: (title: string, start: Date, end: Date, isAllDay: boolean) => void
+  onGoogleEventDelete?: (eventId: string) => Promise<void> | void
+}) => {
+  const { t } = useTranslation()
+  
+  // Handle Google Calendar events
+  if (googleEvent) {
+    return (
+      <Modal
+        title={t('Google Calendar Event')}
+        open={open}
+        onCancel={onClose}
+        footer={[
+          <Button key="close" onClick={onClose}>
+            {t('Close')}
+          </Button>,
+          googleEvent && onGoogleEventDelete ? (
+             <Popconfirm
+                key="delete"
+                title="Delete from Google Calendar?"
+                description="This will permanently delete the event from your Google Calendar."
+                onConfirm={() => googleEvent.id && onGoogleEventDelete(googleEvent.id)}
+                okText="Yes, Delete"
+                cancelText="Cancel"
+              >
+              <Button
+                key="delete"
+                danger
+              >
+                {t('Delete')}
+              </Button>
+            </Popconfirm>
+          ) : null,
+        ]}
+      >
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold">{googleEvent.title || googleEvent.showTitle || t('Untitled Event')}</h3>
+          {googleEvent.description && (
+            <div className="mt-2 text-gray-600">
+              <p>{googleEvent.description}</p>
+            </div>
+          )}
+          {googleEvent.location && (
+            <div className="mt-2 text-gray-600">
+              <p>Location: {googleEvent.location}</p>
+            </div>
+          )}
+          {googleEvent.start && (
+             <div className="mt-2 text-sm text-gray-500">
+                {googleEvent.start.format(googleEvent.allDay ? SHOW_DATE_FORMATTER : SHOW_DATETIME_FORMATTER)}
+                {googleEvent.end && ` - ${googleEvent.end.format(googleEvent.allDay ? SHOW_DATE_FORMATTER : SHOW_DATETIME_FORMATTER)}`}
+             </div>
+          )}
+        </div>
+        <div className="text-sm text-gray-500">
+          {t('This event is from Google Calendar. For editing, please open it in Google Calendar.')}
+        </div>
+        {googleEvent.properties?.htmlLink && (
+           <div className="mt-2">
+             <a href={googleEvent.properties.htmlLink} target="_blank" rel="noopener noreferrer">
+                <Button size="small">{t('Open in Google Calendar')}</Button>
+             </a>
+           </div>
+        )}
+      </Modal>
+    )
+  }
+  
+  // Handle regular task events
+  return task ? (
+    <TaskModal
+      open={open}
+      info={{
+        type: 'edit',
+        initialTaskData: task,
+      }}
+      onCancel={onClose}
+    />
+  ) : null
+}
+
+TaskModal.Create = ({
+  open,
+  initialData,
+  onClose,
+  googleCalendarEnabled,
+  onCreateGoogleEvent
+}: {
+  open: boolean
+  initialData?: any
+  onClose: () => void
+  googleCalendarEnabled?: boolean
+  onCreateGoogleEvent?: (title: string, start: Date, end: Date, isAllDay: boolean) => void
+}) => {
+  const { t } = useTranslation()
+  // Initialize to 'logseq' for default
+  const [createType, setCreateType] = useState<string>('logseq')
+  
+  if (!open) return null
+  
+  // If Google Calendar is not enabled, just show the regular task modal
+  if (!googleCalendarEnabled) {
+    return (
+      <TaskModal
+        open={open}
+        info={{
+          type: 'create',
+          initialData: initialData || {},
+        }}
+        onCancel={onClose}
+      />
+    )
+  }
+  
+  // If we need to choose between Logseq and Google Calendar
+  if (createType === 'select') {
+    return (
+      <Modal
+        title={t('Create New Event')}
+        open={open}
+        onCancel={onClose}
+        footer={null}
+      >
+        <div className="flex flex-col gap-4 py-4">
+          <Button 
+            size="large" 
+            block 
+            onClick={() => setCreateType('logseq')}
+            className="flex items-center justify-center"
+          >
+            <LogseqLogo className="mr-2" /> 
+            <span>{t('Create Logseq Task')}</span>
+          </Button>
+          <Button 
+            size="large" 
+            block 
+            onClick={() => setCreateType('google')}
+            className="flex items-center justify-center"
+            style={{ background: '#4285F4', borderColor: '#4285F4', color: 'white' }}
+          >
+            <span className="mr-2">G</span>
+            {t('Create Google Calendar Event')}
+          </Button>
+        </div>
+      </Modal>
+    )
+  }
+  
+  // For Google Calendar event creation
+  if (createType === 'google') {
+    const [title, setTitle] = useState('')
+    const startDate = initialData?.startDateVal?.toDate() || new Date()
+    const endDate = initialData?.endDateVal?.toDate() || new Date(startDate.getTime() + 60 * 60 * 1000) // 1 hour later
+    const isAllDay = initialData?.allDay || false
+    
+    return (
+      <Modal
+        title={t('Create Google Calendar Event')}
+        open={open}
+        onCancel={onClose}
+        onOk={() => {
+          if (onCreateGoogleEvent && title.trim()) {
+            onCreateGoogleEvent(title, startDate, endDate, isAllDay)
+            onClose()
+          }
+        }}
+      >
+        <div className="mb-4">
+          <input 
+            className="w-full border border-gray-300 p-2 rounded"
+            placeholder={t('Event Title')}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
+        <div className="text-sm text-gray-500">
+          {t('Creating event from')} {startDate.toLocaleString()} {t('to')} {endDate.toLocaleString()}
+        </div>
+      </Modal>
+    )
+  }
+  
+  // For Logseq task creation
+  return (
+    <TaskModal
+      open={open}
+      info={{
+        type: 'create',
+        initialData: initialData || {},
+      }}
+      onCancel={onClose}
+    />
+  )
+}
